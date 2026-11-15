@@ -1,0 +1,153 @@
+# What each cohort is required to take. One row per subject, per year level,
+# per term, per prospectus version.
+#
+# program_code    must exist in course_programs.csv
+# effective_year  the ENTRY academic year this prospectus governs, "YYYY-YYYY".
+#                 Not the year it is used in. A cohort follows the prospectus
+#                 in force when it enrolled, so a fourth-year Block in
+#                 2026-2027 resolves to effective_year 2023-2024.
+# year_level      1 to 5
+# term_number     1 to 3 (trimestral since 2023)
+# subject_code    must exist in subjects.csv
+#
+# Resolution prefers an exact effective_year, otherwise the most recent one on
+# or before the cohort's entry year — a prospectus stays in force until a later
+# one replaces it. So a program that revised its curriculum twice in eight years
+# needs two effective_year values here, not eight. If every currently enrolled
+# cohort of a program follows one prospectus, use a single effective_year
+# throughout; versions can be added later without a migration.
+#
+# This file is the complete list of versions for every program in
+# course_programs.csv. Deleting every row of a version, or changing its
+# effective_year on every row, deletes the old version and its requirements on
+# the next seed run. Check with --dry-run first.
+#
+# term_number follows the prospectus: 1ST SEMESTER is 1, 2ND SEMESTER is 2,
+# SUMMER is 3.
+#
+# This file is not a copy of the prospectus. It lists only the subjects Chronos
+# generates automatically when an administrator creates a cohort's Blocks: the
+# regular, predictable offerings that are the same every term. Anything that
+# needs a scheduling decision stays manual and is left out here:
+#
+#   * Electives (CS ELEC, IT FREE EL 2, ...): which one runs is decided term by
+#     term, and elective slots are not subjects.
+#   * Practicums (CS 4102N, IT 4102N, IT 4202N, IS 4102, IS 4202): whether and
+#     how they meet is decided when they are offered.
+#   * General education, NSTP, PATH-FIT, and EDM subjects.
+#
+# The administrator adds those to a Block by hand. Leaving them out of this file
+# is a statement about automatic generation only, not about whether the cohort
+# takes them.
+#
+program_code,effective_year,year_level,term_number,subject_code
+BSCS,2023-2024,1,1,CIS 1101
+BSCS,2023-2024,1,1,CIS 1102N
+BSCS,2023-2024,1,1,CIS 1103
+BSCS,2023-2024,1,1,CIS 1104
+BSCS,2023-2024,1,2,CIS 1201
+BSCS,2023-2024,1,2,CIS 1202
+BSCS,2023-2024,1,2,CIS 1203
+BSCS,2023-2024,1,2,CIS 1204
+BSCS,2023-2024,1,2,CIS 1205
+BSCS,2023-2024,1,2,CIS 2106N
+BSCS,2023-2024,1,3,CIS 2104
+BSCS,2023-2024,1,3,CIS 2201
+BSCS,2023-2024,1,3,CIS 2202
+BSCS,2023-2024,2,1,CIS 2101
+BSCS,2023-2024,2,1,CIS 2102
+BSCS,2023-2024,2,1,CIS 2103
+BSCS,2023-2024,2,1,CIS 2105
+BSCS,2023-2024,2,1,CS 3101N
+BSCS,2023-2024,2,1,CS 3103
+BSCS,2023-2024,2,2,CIS 2203N
+BSCS,2023-2024,2,2,CIS 2204
+BSCS,2023-2024,2,2,CIS 2205
+BSCS,2023-2024,2,2,CIS 2206N
+BSCS,2023-2024,2,2,CS 3102N
+BSCS,2023-2024,2,2,CS 3203N
+BSCS,2023-2024,2,2,MAT 3101
+BSCS,2023-2024,2,3,CS 3105N
+BSCS,2023-2024,2,3,CS 3201N
+BSCS,2023-2024,2,3,CS 3206
+BSCS,2023-2024,3,1,CS 3104N
+BSCS,2023-2024,3,1,CS 3106N
+BSCS,2023-2024,3,1,CS 3202N
+BSCS,2023-2024,3,1,CS 3205
+BSCS,2023-2024,3,1,CS 4101N
+BSCS,2023-2024,3,2,CS 3204N
+BSCS,2023-2024,3,2,CS 4103
+BSCS,2023-2024,3,2,CS 4201N
+BSIS,2023-2024,1,1,CIS 1101
+BSIS,2023-2024,1,1,CIS 1102N
+BSIS,2023-2024,1,1,CIS 1103
+BSIS,2023-2024,1,1,CIS 1104
+BSIS,2023-2024,1,2,CIS 1201
+BSIS,2023-2024,1,2,CIS 1202
+BSIS,2023-2024,1,2,CIS 1204
+BSIS,2023-2024,1,2,CIS 1205
+BSIS,2023-2024,1,2,CIS 2106N
+BSIS,2023-2024,1,2,IS 3204
+BSIS,2023-2024,1,3,CIS 2104
+BSIS,2023-2024,1,3,CIS 2201
+BSIS,2023-2024,1,3,CIS 2202
+BSIS,2023-2024,2,1,CIS 2101
+BSIS,2023-2024,2,1,CIS 2102
+BSIS,2023-2024,2,1,CIS 2103
+BSIS,2023-2024,2,1,CIS 2105
+BSIS,2023-2024,2,1,IS 3103
+BSIS,2023-2024,2,1,IS 4103
+BSIS,2023-2024,2,2,CIS 2203N
+BSIS,2023-2024,2,2,CIS 2205
+BSIS,2023-2024,2,2,IS 3101N
+BSIS,2023-2024,2,2,IS 3102
+BSIS,2023-2024,2,2,IS 3106
+BSIS,2023-2024,2,2,IS 4104N
+BSIS,2023-2024,2,3,IS 3105
+BSIS,2023-2024,2,3,IS 3107
+BSIS,2023-2024,2,3,IS 3201
+BSIS,2023-2024,3,1,IS 3104
+BSIS,2023-2024,3,1,IS 3205
+BSIS,2023-2024,3,1,IS 3206
+BSIS,2023-2024,3,1,IS 4101
+BSIS,2023-2024,3,2,CIS 1203
+BSIS,2023-2024,3,2,CIS 2204
+BSIS,2023-2024,3,2,CIS 2206N
+BSIS,2023-2024,3,2,IS 3203
+BSIS,2023-2024,3,2,IS 3207N
+BSIS,2023-2024,3,2,IS 4201
+BSIT,2023-2024,1,1,CIS 1101
+BSIT,2023-2024,1,1,CIS 1102N
+BSIT,2023-2024,1,1,CIS 1103
+BSIT,2023-2024,1,1,CIS 1104
+BSIT,2023-2024,1,2,CIS 1201
+BSIT,2023-2024,1,2,CIS 1202
+BSIT,2023-2024,1,2,CIS 1204
+BSIT,2023-2024,1,2,CIS 1205
+BSIT,2023-2024,1,2,CIS 2106N
+BSIT,2023-2024,1,2,IT 3106
+BSIT,2023-2024,1,3,CIS 2104
+BSIT,2023-2024,1,3,CIS 2201
+BSIT,2023-2024,1,3,CIS 2202
+BSIT,2023-2024,2,1,CIS 2101
+BSIT,2023-2024,2,1,CIS 2103
+BSIT,2023-2024,2,1,CIS 2105
+BSIT,2023-2024,2,1,IT 3101N
+BSIT,2023-2024,2,1,IT 3107
+BSIT,2023-2024,2,1,IT 4104
+BSIT,2023-2024,2,2,CIS 2203N
+BSIT,2023-2024,2,2,IT 3102N
+BSIT,2023-2024,2,2,IT 3103A
+BSIT,2023-2024,2,2,IT 3202N
+BSIT,2023-2024,2,3,IT 3104N
+BSIT,2023-2024,2,3,IT 3201N
+BSIT,2023-2024,2,3,IT 3204N
+BSIT,2023-2024,3,1,IT 3105N
+BSIT,2023-2024,3,1,IT 3203N
+BSIT,2023-2024,3,1,IT 3206N
+BSIT,2023-2024,3,1,IT 4201
+BSIT,2023-2024,3,2,CIS 2204
+BSIT,2023-2024,3,2,CIS 2206N
+BSIT,2023-2024,3,2,IT 3205
+BSIT,2023-2024,3,2,IT 4101
+BSIT,2023-2024,3,2,IT 4103

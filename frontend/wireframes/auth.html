@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>System Access | Chronos Scheduling</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+        .grid-bg-dark {
+            background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+    </style>
+    <script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                "outline": "#727785", "on-secondary": "#ffffff", "on-error": "#ffffff", "tertiary-fixed-dim": "#ffb786",
+                "outline-variant": "#c2c6d6", "surface-container-low": "#f2f4f6", "surface-container-highest": "#e0e3e5",
+                "error": "#ba1a1a", "surface-container-lowest": "#ffffff", "surface-tint": "#005ac2",
+                "inverse-surface": "#2d3133", "on-tertiary-fixed-variant": "#723600", "inverse-primary": "#adc6ff",
+                "inverse-on-surface": "#eff1f3", "primary-container": "#2170e4", "surface-dim": "#d8dadc",
+                "tertiary": "#924700", "on-primary": "#ffffff", "on-secondary-fixed": "#0b1c30",
+                "surface-bright": "#f7f9fb", "tertiary-fixed": "#ffdcc6", "secondary": "#505f76",
+                "primary-fixed": "#d8e2ff", "on-surface-variant": "#424754", "on-primary-fixed-variant": "#004395",
+                "on-error-container": "#93000a", "on-secondary-fixed-variant": "#38485d", "error-container": "#ffdad6",
+                "primary-fixed-dim": "#adc6ff", "on-primary-fixed": "#001a42", "on-tertiary": "#ffffff",
+                "secondary-fixed-dim": "#b7c8e1", "secondary-container": "#d0e1fb", "surface-container": "#eceef0",
+                "surface-container-high": "#e6e8ea", "background": "#f7f9fb", "on-tertiary-container": "#fffbff",
+                "secondary-fixed": "#d3e4fe", "surface-variant": "#e0e3e5", "surface": "#f7f9fb",
+                "on-background": "#191c1e", "tertiary-container": "#b75b00", "on-primary-container": "#fefcff",
+                "on-tertiary-fixed": "#311400", "on-surface": "#191c1e", "primary": "#0058be",
+                "on-secondary-container": "#54647a"
+              },
+              "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+              "spacing": { "margin-desktop": "32px", "sidebar-width": "260px", "gutter": "16px", "unit": "4px" },
+              "fontFamily": {
+                "body-sm": ["IBM Plex Sans"], "headline-md": ["Space Grotesk"], "body-md": ["IBM Plex Sans"],
+                "body-lg": ["IBM Plex Sans"], "headline-lg": ["Space Grotesk"], "label-md": ["IBM Plex Sans"],
+                "mono-data": ["IBM Plex Mono"], "headline-xl": ["Space Grotesk"]
+              },
+              "fontSize": {
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                "headline-lg": ["30px", {"lineHeight": "36px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                "mono-data": ["13px", {"lineHeight": "18px", "fontWeight": "450"}],
+                "headline-xl": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface font-body-md selection:bg-primary/20 antialiased h-screen overflow-hidden flex">
+
+    <!-- Left Branding Panel (Hidden on smaller screens) -->
+    <div class="hidden lg:flex w-[45%] bg-[#0b1c30] relative flex-col justify-between p-12 overflow-hidden shadow-[10px_0_30px_rgba(0,0,0,0.1)] z-10">
+        <!-- Background Decor -->
+        <div class="absolute inset-0 grid-bg-dark pointer-events-none"></div>
+        <div class="absolute top-0 right-0 w-[600px] h-[600px] bg-primary rounded-full blur-[150px] opacity-10 translate-x-1/3 -translate-y-1/3 pointer-events-none"></div>
+        <div class="absolute bottom-0 left-0 w-[400px] h-[400px] bg-tertiary-container rounded-full blur-[120px] opacity-10 -translate-x-1/4 translate-y-1/4 pointer-events-none"></div>
+        
+        <!-- Header -->
+        <div class="relative z-10 mt-8">
+            <h1 class="font-headline-xl text-white text-[56px] tracking-tight leading-none mb-2">Chronos</h1>
+            <div class="flex items-center gap-3">
+                <span class="w-10 h-[2px] bg-primary"></span>
+                <p class="font-label-md text-primary-fixed uppercase tracking-widest text-[13px]">USC DCISM Command Center</p>
+            </div>
+        </div>
+
+        <!-- Terminal Output Graphic -->
+        <div class="relative z-10 bg-black/20 border border-white/10 rounded-lg p-6 backdrop-blur-sm max-w-md my-8">
+            <div class="flex items-center gap-2 mb-4 border-b border-white/10 pb-3">
+                <div class="w-2.5 h-2.5 rounded-full bg-error"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-tertiary-container"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-primary"></div>
+                <span class="font-mono-data text-white/50 text-[10px] ml-2 tracking-widest">SYS_DIAGNOSTICS</span>
+            </div>
+            <div class="font-mono-data text-primary-fixed/80 text-[12px] space-y-2">
+                <p class="flex gap-2"><span class="text-white/30">></span> <span>Initializing genetic scheduling protocol... <span class="text-secondary-fixed">OK</span></span></p>
+                <p class="flex gap-2"><span class="text-white/30">></span> <span>Loading faculty constraints... <span class="text-secondary-fixed">148 Records</span></span></p>
+                <p class="flex gap-2"><span class="text-white/30">></span> <span>Validating room capacities... <span class="text-secondary-fixed">OK</span></span></p>
+                <p class="flex gap-2"><span class="text-white/30">></span> <span class="text-white">Awaiting operator authentication_</span><span class="animate-pulse w-2 h-3 bg-white inline-block ml-1 align-middle"></span></p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="relative z-10 mb-4">
+            <div class="flex items-center gap-3 mb-2">
+                <span class="relative flex h-2.5 w-2.5">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary-fixed"></span>
+                </span>
+                <p class="font-mono-data text-white text-[11px] uppercase tracking-wider">System Status: Operational</p>
+            </div>
+            <p class="font-mono-data text-white/40 text-[10px] uppercase tracking-widest">Version 2026.07.PROD &bull; End-to-End Encrypted</p>
+        </div>
+    </div>
+
+    <!-- Right Authentication Panel -->
+    <div class="w-full lg:w-[55%] bg-surface flex flex-col justify-center items-center p-8 relative overflow-y-auto">
+        
+        <div class="w-full max-w-[420px] bg-surface-container-lowest border border-outline-variant p-8 sm:p-10 rounded-2xl shadow-xl">
+            
+            <div class="text-center mb-8">
+                <div class="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4 border border-primary/20">
+                    <span class="material-symbols-outlined text-primary text-[28px]">admin_panel_settings</span>
+                </div>
+                <h2 class="font-headline-lg text-on-surface tracking-tight text-[28px]">System Access</h2>
+                <p class="font-body-md text-on-surface-variant mt-1 text-[14px]">Enter credentials to access the master terminal.</p>
+            </div>
+
+            <form id="auth-form" class="space-y-6" onsubmit="handleAuth(event)">
+                
+                <div class="space-y-1.5">
+                    <label class="font-label-md text-on-surface-variant uppercase tracking-wider text-[11px] block">Faculty ID / Admin Email</label>
+                    <div class="relative">
+                        <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-outline material-symbols-outlined text-[20px] pointer-events-none">badge</span>
+                        <input type="text" placeholder="e.g., admin@usc.edu.ph" class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-11 pr-4 py-3 text-[14px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" required>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="font-label-md text-on-surface-variant uppercase tracking-wider text-[11px] block">Security Key</label>
+                        <a href="#" class="font-label-md text-primary hover:underline text-[11px] tracking-wide">Forgot Key?</a>
+                    </div>
+                    <div class="relative">
+                        <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-outline material-symbols-outlined text-[20px] pointer-events-none">lock</span>
+                        <input type="password" placeholder="••••••••" class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-11 pr-4 py-3 text-[14px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" required>
+                    </div>
+                </div>
+
+                <button id="auth-btn" type="submit" class="w-full flex items-center justify-center gap-2 bg-[#005ac2] text-white font-bold py-3.5 rounded-lg shadow-sm hover:bg-[#004b9e] active:scale-95 transition-all mt-2 text-[15px] tracking-wide border border-transparent">
+                    Authenticate <span class="material-symbols-outlined text-[20px]">login</span>
+                </button>
+            </form>
+
+        </div>
+        
+        <p class="font-label-md text-outline text-[10px] mt-8 uppercase tracking-widest flex items-center justify-center gap-1.5">
+            <span class="material-symbols-outlined text-[14px]">verified_user</span> Authorized Department Personnel Only
+        </p>
+    </div>
+
+<script>
+    function handleAuth(event) {
+        event.preventDefault();
+        const btn = document.getElementById('auth-btn');
+        const originalContent = btn.innerHTML;
+        
+        // Show loading state
+        btn.innerHTML = '<span class="material-symbols-outlined animate-spin text-[20px]">progress_activity</span> Authenticating...';
+        btn.disabled = true;
+        btn.classList.add('opacity-90', 'cursor-wait');
+
+        // Simulate network request before "redirecting"
+        setTimeout(() => {
+            btn.innerHTML = '<span class="material-symbols-outlined text-[20px]">check_circle</span> Access Granted';
+            btn.classList.remove('bg-[#005ac2]', 'hover:bg-[#004b9e]');
+            btn.classList.add('bg-[#106b3a]', 'border-[#106b3a]'); // Shift to a success green temporarily
+            
+            // Redirect simulation
+            setTimeout(() => {
+                window.location.href = "dashboard.html"; 
+                // Reset just in case they hit back button
+                setTimeout(() => {
+                    btn.innerHTML = originalContent;
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-90', 'cursor-wait', 'bg-[#106b3a]', 'border-[#106b3a]');
+                    btn.classList.add('bg-[#005ac2]', 'hover:bg-[#004b9e]');
+                }, 500);
+            }, 800);
+        }, 1500);
+    }
+</script>
+</body>
+</html>

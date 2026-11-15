@@ -1,0 +1,336 @@
+#!/usr/bin/env bash
+# CHR-236 / CHR-ENV-007: production deployment receiver on the DCISM server.
+#
+# Installed at ~/chronos.dcism.org/bin/deploy-production (owner-only, mode 700)
+# and reachable only through the forced-command deploy key in
+# ~/.ssh/authorized_keys. GitHub Actions sends a Git pack holding exactly one
+# commit on stdin and the command "deploy <sha> <receiver-sha256> <run-number>".
+# See docs/DCISM_DEPLOYMENT.md.
+#
+# The forced command may name the target as its one argument: none or
+# "production" deploys production, "test" deploys the developer-only test
+# environment (docs/TEST_ENVIRONMENT.md). Each target has its own deploy key,
+# so the test key can never reach production.
+
+set -Eeuo pipefail
+umask 077
+
+target_env="${1:-production}"
+case "$target_env" in
+  production)
+    root="$HOME/chronos.dcism.org"
+    state="$HOME/.chronos"
+    api_name="chronos-api"
+    worker_name="chronos-worker"
+    port="20309"
+    public_url="https://chronos.dcism.org"
+    base_path="/"
+    # The public site answers "/" without credentials.
+    public_root_status="200"
+    ;;
+  test)
+    root="$HOME/chronos-test.dcism.org"
+    state="$HOME/.chronos-test"
+    api_name="chronos-test-api"
+    worker_name="chronos-test-worker"
+    # Production's DEVTEST_UPSTREAM forwards /devtest/ here. DCISM assigns
+    # ports per account: 20318 is reserved by the chronos-test.dcism.org
+    # subdomain, whose own host the app refuses (TRUSTED_HOSTS).
+    port="20318"
+    public_url="https://chronos.dcism.org/devtest"
+    base_path="/devtest/"
+    # The developer gate (DEV_ACCESS_USERS) refuses "/" without credentials.
+    public_root_status="401"
+    ;;
+  *)
+    printf 'Unknown deployment target %s.\n' "$target_env" >&2
+    exit 64
+    ;;
+esac
+releases="$root/releases"
+current="$root/current"
+env_file="$state/backend.env"
+backups="$state/backups"
+keep_backups=10
+
+# Each target has its own Python, uv and cache, so a test deploy cannot
+# plant anything production's next install would pick up.
+export UV_PYTHON_INSTALL_DIR="$state/python"
+export UV_CACHE_DIR="$state/uv-cache"
+uv="$state/uv-venv/bin/uv"
+
+original_command="${SSH_ORIGINAL_COMMAND:-}"
+if [[ ! "$original_command" =~ ^deploy\ ([0-9a-f]{40})\ ([0-9a-f]{64})\ ([0-9]+)$ ]]; then
+  printf 'Rejected deployment command.\n' >&2
+  exit 64
+fi
+sha="${BASH_REMATCH[1]}"
+expected_receiver_sha="${BASH_REMATCH[2]}"
+run_number="${BASH_REMATCH[3]}"
+
+read -r receiver_sha _ < <(sha256sum "$0")
+if [[ "$receiver_sha" != "$expected_receiver_sha" ]]; then
+  printf 'Installed deployment receiver does not match the reviewed version.\n' >&2
+  exit 65
+fi
+
+if [[ "${DEPLOY_LOCKED:-}" != "1" ]]; then
+  exec flock --close --wait 300 --conflict-exit-code 75 \
+    "$root/.deploy.lock" env DEPLOY_LOCKED=1 SSH_ORIGINAL_COMMAND="$original_command" \
+    "$0" "$target_env"
+fi
+
+[[ -f "$env_file" ]] || {
+  printf 'Missing %s; see docs/DCISM_DEPLOYMENT.md.\n' "$env_file" >&2
+  exit 78
+}
+[[ -x "$uv" ]] || {
+  printf 'Missing %s; see docs/DCISM_DEPLOYMENT.md.\n' "$uv" >&2
+  exit 78
+}
+
+release_id="$sha-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+target="releases/$release_id"
+release="$root/$target"
+pack=""
+repository=""
+previous=""
+activated=false
+deployment_committed=false
+
+record_deployment() {
+  local result="$1"
+  local previous_release="${2:-none}"
+  printf '%s deployer=github-actions run=%s sha=%s previous=%s health=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$run_number" "$sha" "$previous_release" "$result" \
+    >> "$root/deployments.log"
+  chmod 600 "$root/deployments.log"
+}
+
+health_check() {
+  local expected_sha="$1"
+  local ready=false
+  local deployed_sha
+
+  for _ in {1..60}; do
+    if deployed_sha="$(curl --fail --silent --show-error \
+      --connect-timeout 5 --max-time 15 \
+      "http://127.0.0.1:$port/deployment.txt")" && \
+      [[ "$deployed_sha" == "$expected_sha" ]]; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$ready" == true ]] || return 1
+
+  curl --fail --silent --show-error --output /dev/null \
+    --connect-timeout 5 --max-time 15 "http://127.0.0.1:$port/health" || return 1
+  curl --fail --silent --show-error --output /dev/null \
+    --connect-timeout 5 --max-time 15 "$public_url/health" || return 1
+  [[ "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 5 --max-time 15 "$public_url/")" == "$public_root_status" ]] || return 1
+  deployed_sha="$(curl --fail --silent --show-error \
+    --connect-timeout 5 --max-time 15 "$public_url/deployment.txt")" || return 1
+  [[ "$deployed_sha" == "$expected_sha" ]]
+}
+
+stop_apps() {
+  local name
+  for name in "$api_name" "$worker_name"; do
+    if pm2 describe "$name" >/dev/null 2>&1; then
+      pm2 delete "$name" >/dev/null || return 1
+    fi
+  done
+}
+
+# Both processes run from the "current" symlink, so a PM2 restart after a
+# crash picks up whichever release is active. The backend reads every other
+# setting from backend/.env, a link to the owner-only settings file.
+configure_apps() {
+  stop_apps || return 1
+  FRONTEND_DIST_DIR="$current/frontend/dist" pm2 start "$current/backend/.venv/bin/python" \
+    --name "$api_name" --cwd "$current/backend" --interpreter none --time \
+    --kill-timeout 10000 \
+    -- -m uvicorn app.main:app --host 127.0.0.1 --port "$port" --no-proxy-headers \
+    >/dev/null || return 1
+  pm2 start "$current/backend/.venv/bin/python" \
+    --name "$worker_name" --cwd "$current/backend" --interpreter none --time \
+    --kill-timeout 15000 \
+    -- -m app.worker >/dev/null
+}
+
+rollback() {
+  local previous_release="$1"
+  local rollback_link="$root/.rollback-$sha-$$"
+  local previous_sha
+
+  if [[ -n "$previous_release" && -d "$root/$previous_release" ]]; then
+    ln -s "$previous_release" "$rollback_link"
+    mv -Tf "$rollback_link" "$current"
+    IFS= read -r previous_sha < "$root/$previous_release/.release-sha"
+    configure_apps || return 1
+    health_check "$previous_sha" || return 1
+  else
+    stop_apps || return 1
+  fi
+  pm2 save >/dev/null
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+
+  if [[ "$activated" == true && "$deployment_committed" != true ]]; then
+    if rollback "$previous"; then
+      activated=false
+      record_deployment failed-rolled-back "${previous:-none}"
+      printf 'Deployment failed; production was rolled back to the previous release.\n' >&2
+      printf 'Database migrations are not reversed; restore %s if needed.\n' "$backups" >&2
+    else
+      record_deployment failed-rollback-error "${previous:-none}"
+      printf 'Deployment and rollback both failed.\n' >&2
+    fi
+  elif [[ "$activated" != true && -n "$previous" && "${worker_stopped:-false}" == true ]]; then
+    # Failed after stopping the worker for migrations but before switching:
+    # bring the untouched previous release back up.
+    configure_apps && pm2 save >/dev/null
+  fi
+
+  [[ -z "$pack" ]] || rm -f "$pack"
+  [[ -z "$repository" ]] || rm -rf "$repository"
+  if [[ -d "$release" ]] && \
+    { [[ ! -L "$current" ]] || [[ "$(readlink "$current")" != "$target" ]]; }; then
+    rm -rf "$release"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+prune_releases() {
+  local current_release="$1"
+  local previous_release="$2"
+  local directory
+  local name
+  local relative
+
+  for directory in "$releases"/*; do
+    [[ -d "$directory" ]] || continue
+    name="${directory##*/}"
+    [[ "$name" =~ ^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]] || continue
+    relative="releases/$name"
+    if [[ "$relative" != "$current_release" && "$relative" != "$previous_release" ]]; then
+      rm -rf -- "$directory"
+    fi
+  done
+}
+
+backup_database() {
+  local database_url
+  local stamp
+  local file
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  file="$backups/$stamp-$sha.dump"
+  database_url="$(sed -n 's/^DATABASE_URL=//p' "$env_file" | tail -n 1)"
+  [[ -n "$database_url" ]] || return 1
+  mkdir -p "$backups"
+  pg_dump --format=custom --no-owner --file="$file" "$database_url" || return 1
+  # Keep the newest backups only.
+  find "$backups" -maxdepth 1 -name '*.dump' -type f -printf '%T@ %p\n' |
+    sort -rn | tail -n +"$((keep_backups + 1))" | cut -d' ' -f2- |
+    while IFS= read -r old; do rm -f -- "$old"; done
+}
+
+mkdir -p "$releases"
+pack="$(mktemp "$root/.deploy-pack.XXXXXX")"
+repository="$(mktemp -d "$root/.deploy-repository.XXXXXX")"
+
+cp /dev/stdin "$pack"
+git init --bare --quiet "$repository"
+git -C "$repository" index-pack --stdin < "$pack" >/dev/null
+git -C "$repository" cat-file -e "$sha^{commit}" || {
+  printf 'Deployment pack does not contain commit %s.\n' "$sha" >&2
+  exit 65
+}
+
+last_run_number=0
+if [[ -f "$root/last-deploy-run-number" ]]; then
+  IFS= read -r last_run_number < "$root/last-deploy-run-number"
+fi
+[[ "$last_run_number" =~ ^[0-9]+$ ]] || exit 66
+if (( run_number < last_run_number )); then
+  printf 'Refusing stale workflow run %s; newest accepted run is %s.\n' \
+    "$run_number" "$last_run_number" >&2
+  exit 76
+fi
+printf '%s\n' "$run_number" > "$root/.last-deploy-run-number.new"
+mv -f "$root/.last-deploy-run-number.new" "$root/last-deploy-run-number"
+
+if [[ -L "$current" ]] && \
+  [[ -f "$current/.release-sha" ]] && \
+  IFS= read -r active_sha < "$current/.release-sha" && \
+  [[ "$active_sha" == "$sha" ]] && health_check "$sha"; then
+  printf 'Commit %s is already healthy in production.\n' "$sha"
+  exit 0
+fi
+
+# Only the application ships. dataset/ and experiments/ hold private research
+# inputs and never reach this shared server.
+mkdir "$release"
+git -C "$repository" archive "$sha" backend frontend |
+  tar --extract --file=- --directory="$release" --no-same-owner --no-same-permissions
+printf '%s\n' "$sha" > "$release/.release-sha"
+
+cd "$release/frontend"
+node_major="$(node -p 'process.versions.node.split(".")[0]')"
+[[ "$node_major" == "24" ]] || {
+  printf 'Production requires Node.js 24; found %s.\n' "$(node --version)" >&2
+  exit 69
+}
+export CI=true
+npm ci --no-audit --no-fund
+# The API serves the SPA, so requests stay same-origin, under the base path.
+VITE_API_BASE_URL="${base_path%/}" VITE_ENVIRONMENT="$target_env" \
+  npm run build -- --base="$base_path"
+npm run check:offline
+printf '%s\n' "$sha" > dist/deployment.txt
+
+cd "$release/backend"
+"$uv" venv --quiet --python 3.12 .venv
+"$uv" pip install --quiet --python .venv/bin/python -r requirements.txt
+ln -s "$env_file" .env
+.venv/bin/python -c "import app.main" >/dev/null
+
+if [[ -L "$current" ]]; then
+  previous="$(readlink "$current")"
+  [[ -f "$root/$previous/.release-sha" ]] || exit 66
+fi
+
+# Migrations run with no worker active (mixed old/new workers are unsupported)
+# and after a fresh backup, since a migration cannot be rolled back here.
+worker_stopped=false
+if pm2 describe "$worker_name" >/dev/null 2>&1; then
+  pm2 stop "$worker_name" >/dev/null
+  worker_stopped=true
+fi
+backup_database
+.venv/bin/alembic upgrade head
+
+next_link="$root/.current-$sha-$$"
+ln -s "$target" "$next_link"
+mv -Tf "$next_link" "$current"
+activated=true
+
+if ! configure_apps || ! health_check "$sha" || ! pm2 save >/dev/null; then
+  exit 1
+fi
+
+record_deployment ok "${previous:-none}"
+deployment_committed=true
+prune_releases "$target" "$previous" || \
+  printf 'Warning: old releases could not be pruned.\n' >&2
+printf 'Deployed %s to %s\n' "$sha" "$public_url"

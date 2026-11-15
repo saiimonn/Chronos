@@ -1,0 +1,7 @@
+# Synthetic buildings for the seed_scenario test term. Not DCISM's real campus.
+#
+# building_code  uppercase, unique
+# building_name  unique ignoring case
+building_code,building_name
+SAB,Sample Academic Building
+STL,Sample Technology Laboratories

@@ -1,0 +1,46 @@
+# Local-production stack: one container serves the built frontend and the API
+# on port 8000, and the worker runs GA/ARM jobs. Supabase still runs separately
+# (`supabase start`). Host networking keeps each client's real address visible
+# to the backend's subnet check; Docker port publishing would rewrite it.
+# Trusted hosts and the client subnet come from backend/.env; the bind address
+# from CHRONOS_BIND_HOST (default 127.0.0.1, set 0.0.0.0 for the LAN).
+services:
+  app:
+    build:
+      context: ./backend
+      target: production
+      additional_contexts:
+        frontend: ./frontend
+    env_file: ./backend/.env
+    environment:
+      UVICORN_HOST: ${CHRONOS_BIND_HOST:-127.0.0.1}
+    network_mode: host
+    restart: unless-stopped
+    # CHR-178 / CHR-ENV-005: healthy = PostgreSQL answers and /health returns
+    # 200 on loopback. Probes stay on 127.0.0.1, so bind 127.0.0.1 or 0.0.0.0
+    # and keep loopback in TRUSTED_HOSTS and ALLOWED_CLIENT_NETWORKS.
+    # Docker only reports health; docs/LOCAL_DEPLOYMENT_RUNBOOK.md covers recovery.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; from sqlalchemy import text; from app.db.session import engine; engine.connect().execute(text('SELECT 1')); u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+      target: development
+    command: ["python", "-m", "app.worker"]
+    env_file: ./backend/.env
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    # The worker has no port; healthy = it can reach the job queue in PostgreSQL.
+    # A crash exits the container and restart brings it back.
+    healthcheck:
+      test: ["CMD", "python", "-c", "from sqlalchemy import text; from app.db.session import engine; engine.connect().execute(text('SELECT 1 FROM execution_job LIMIT 1'))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

@@ -1,0 +1,26 @@
+{
+  "teacher_subject": {
+    "min_support": "<TBD: at most 4 decimal places>",
+    "min_confidence": "<TBD: at most 4 decimal places>",
+    "min_lift": "<TBD: must be greater than 1.0; at most 4 decimal places>",
+    "min_term_recurrence": "<TBD>"
+  },
+  "teacher_day": {
+    "min_support": "<TBD: at most 4 decimal places>",
+    "min_confidence": "<TBD: at most 4 decimal places>",
+    "min_lift": "<TBD: must be greater than 1.0; at most 4 decimal places>",
+    "min_term_recurrence": "<TBD>"
+  },
+  "teacher_time": {
+    "min_support": "<TBD: at most 4 decimal places>",
+    "min_confidence": "<TBD: at most 4 decimal places>",
+    "min_lift": "<TBD: must be greater than 1.0; at most 4 decimal places>",
+    "min_term_recurrence": "<TBD>"
+  },
+  "teacher_subject_room": {
+    "min_support": "<TBD: at most 4 decimal places>",
+    "min_confidence": "<TBD: at most 4 decimal places>",
+    "min_lift": "<TBD: must be greater than 1.0; at most 4 decimal places>",
+    "min_term_recurrence": "<TBD>"
+  }
+}

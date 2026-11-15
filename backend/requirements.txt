@@ -1,0 +1,21 @@
+# Thesis-mandated versions (see backend/CLAUDE.md) — do not bump without
+# updating the thesis tool table.
+fastapi==0.139.0
+sqlalchemy==2.0.30
+mlxtend==0.25.0
+deap==1.4.1
+
+# Supporting libraries. Pinned so CI stays reproducible and an upstream release
+# cannot turn a required status check red on its own.
+uvicorn[standard]==0.52.4
+alembic==1.19.1
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pydantic-settings==2.15.0
+pandas==3.0.5
+openpyxl==3.1.5
+matplotlib==3.11.1
+python-dotenv==1.2.3
+pytest==9.1.1
+httpx==0.28.1
+argon2-cffi==25.1.0

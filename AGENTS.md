@@ -1,0 +1,22 @@
+# Chronos Repository Instructions
+
+- The thesis governs research-critical behavior; the repository governs current implementation details.
+- The thesis ERD, especially Figure 10, is outdated. Reconstruct the current schema from SQLAlchemy models and Alembic migrations; never replace the repository schema from that diagram.
+- Preserve the required stack: React/Vite, Python/FastAPI, SQLAlchemy, PostgreSQL 17 through local Supabase/Docker, Mlxtend Apriori, and DEAP.
+- Production is local-only. Normal runtime must not depend on cloud databases, external AI/optimization APIs, managed Supabase, or other external production services.
+- GA fitness is strictly lexicographic: assignment completeness, then fewer hard-constraint violations, then historical-pattern attainment. Do not replace it with a compensating weighted sum.
+- Historical rules are soft guidance only. Export requires 100% assignment completeness and zero hard conflicts, confirmed by an independent deterministic validator.
+- Preserve the four historical streams: teacher-subject, teacher-day, teacher-time, and teacher-subject-room.
+- Keep routine generation separate from Apriori. New rule sets remain candidates until validated and explicitly activated by a Department Administrator.
+- Keep current-term data, immutable historical snapshots, rule sets, generated schedules, execution metadata, and authentication/configuration clearly separated.
+- Inspect existing code before adding abstractions. Extend existing models, services, API patterns, and frontend structure where possible.
+- Never rewrite applied migrations. Use additive forward migrations and protect existing data.
+- Keep domain/algorithm logic out of FastAPI routes and avoid coupling GA/ARM code directly to SQLAlchemy objects.
+- Use deterministic development fixtures and `<TBD>` for unknown DCISM-specific values; never invent permanent institutional data or research results.
+- CHR-107 / CHR-COLAB-006 permits approved original workbooks, versioned preprocessing, and reviewed results in this private repository. Follow `dataset/README.md` and `experiments/README.md`; keep credentials/scratch out of Git, use the experiment ticket's Jira assignee as its sole official runner/publisher, and never fetch the original workbook or holdout into threshold selection before freezing.
+- CHR-133 / CHR-COLAB-007 permits versioned, hash-inventoried private review evidence under `dataset/handoff/`. Publication is not administrator approval. Preserve pending decisions, use new versions for reviewed changes, and exclude the entire handoff tree from threshold selection. Database dumps and authentication/session state remain untracked.
+- Research-only exception (project owner, 2026-10-26): Chronos is a thesis research setup. A named researcher may review references for research-only onboarding and draft RuleSet import, recorded as `approved_for_research_by_researcher` with the reviewer's real name and role. Never record that as Department Administrator approval. RuleSet activation for operational use still requires the Department Administrator.
+- Domain and algorithm changes require focused tests. Use fixed seeds for stochastic tests and PostgreSQL for database-specific behavior.
+- Every change must trace both the native Jira key (for example, `CHR-39`) and the stable implementation-plan ID (for example, `CHR-DOC-002`) according to `GUIDE.md`.
+- Do not make destructive or major architectural changes without explicit approval.
+- Demos, experiments and manual testing happen only in the test environment at `/devtest/`, following the mandatory demo flow and rules in `docs/TEST_ENVIRONMENT.md` (log out of the official site, use a private window or isolated browser context, shared developer password only). Never use the official site or production database for them, and never deploy, refresh the test database or change production settings without explicit approval in that session.

@@ -1,0 +1,45 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# Supabase local (CLI stack lives at ./supabase)
+supabase/.branches/
+supabase/.temp/
+infra/supabase/.branches/
+infra/supabase/.temp/
+
+# CHR-179 / CHR-OPS-001: local database backups never enter Git.
+/backups/
+# Also archives written elsewhere, e.g. a relative path run from backend/.
+**/backups/
+*.dump
+# Local-only Compose override, e.g. pointing at a restored database.
+/docker-compose.override.yml
+
+# OS
+.DS_Store
+
+# Private checkout of saiimonn/Chronos-docs. The committed symlinks docs,
+# dataset and experiments point into it.
+/private/
+
+# Local agent state
+.claude/worktrees/
+.playwright-mcp/
+
+# Research data (CHR-107 / CHR-COLAB-006) lives in saiimonn/Chronos-docs, with
+# its allowlist ignore rules and attributes.
+
+# Local staging only. Publish reviewed files under dataset/ or experiments/.
+backend/scripts/colab_prototype/output/
+
+# graphify knowledge graph outputs
+graphify-out/

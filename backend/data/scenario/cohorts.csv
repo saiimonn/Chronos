@@ -1,0 +1,16 @@
+# The Blocks the seed_scenario term runs. Each row asks cohort generation for
+# the named sections; their classes come from curriculum.csv.
+#
+# program_code     must exist in course_programs.csv
+# year_level       1 to 5
+# section_letters  space-separated, e.g. "A B"
+program_code,year_level,section_letters
+BSCS,1,A B
+BSCS,2,A
+BSCS,3,A
+BSIT,1,A B
+BSIT,2,A
+BSIT,3,A
+BSIS,1,A
+BSIS,2,A
+BSIS,3,A

@@ -1,0 +1,21 @@
+# Synthetic faculty for the seed_scenario test term. Placeholder names only;
+# no row describes a real person.
+#
+# full_name        the identity the seed matches on when re-run
+# is_full_time     true (24-unit cap) or false (18-unit cap)
+# available_from   HH:MM; the member is available in every slot that starts
+# available_until  at or after available_from and ends at or before
+#                  available_until
+full_name,is_full_time,available_from,available_until
+Sample Instructor 01,true,07:30,18:00
+Sample Instructor 02,true,07:30,18:00
+Sample Instructor 03,true,07:30,18:00
+Sample Instructor 04,true,07:30,21:00
+Sample Instructor 05,true,09:00,21:00
+Sample Instructor 06,true,09:00,21:00
+Sample Instructor 07,true,07:30,16:30
+Sample Instructor 08,true,10:30,21:00
+Sample Instructor 09,false,07:30,12:30
+Sample Instructor 10,false,13:00,21:00
+Sample Instructor 11,false,16:00,21:00
+Sample Instructor 12,false,07:30,21:00

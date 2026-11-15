@@ -1,0 +1,4 @@
+source_sheet,academic_year,term_number,complete,include_in_research,exclusion_reason
+S1 AY2018-19,2018-2019,1,true,true,
+S2 AY2018-19,2018-2019,2,true,true,
+Sheet,,,false,false,not a historical academic term

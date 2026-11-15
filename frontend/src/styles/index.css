@@ -1,0 +1,144 @@
+/* Fonts are bundled locally (CHR-ENV-002): the deployed UI must not call out of the LAN. */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+@import '@fontsource/ibm-plex-mono/700.css';
+@import '@fontsource/ibm-plex-sans/300.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/700.css';
+@import '@fontsource/space-grotesk/300.css';
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/space-grotesk/700.css';
+@import 'material-symbols/outlined.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* iOS zooms focused controls under 16px; Preflight inherits size from text-sm/text-xs ancestors. */
+  @media (max-width: 767px) {
+    input, select, textarea { font-size: 16px; }
+  }
+}
+
+@layer components {
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    vertical-align: middle;
+    font-family: 'Material Symbols Outlined';
+    font-style: normal;
+    font-weight: normal;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    display: inline-block;
+  }
+
+  /* Custom scrollbars */
+  .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: #f2f4f6; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #c2c6d6; border-radius: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #727785; }
+
+  /* Grid background for auth page */
+  .grid-bg-dark {
+    background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* Dot grid for room page */
+  .grid-bg {
+    background-image: linear-gradient(#e0e3e5 1px, transparent 1px),
+      linear-gradient(90deg, #e0e3e5 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* Status strips */
+  .status-strip-blue { border-left: 2px solid #0058be; }
+  .status-strip-red  { border-left: 2px solid #ba1a1a; }
+  .status-strip-gold { border-left: 2px solid #924700; }
+
+  /* Conflict glow */
+  .conflict-glow { box-shadow: 0 0 15px rgba(186, 26, 26, 0.2); }
+
+  /* Modal transitions */
+  .modal-enter {
+    opacity: 0;
+  }
+  .modal-enter .modal-content {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  .modal-enter-active {
+    opacity: 1;
+    transition: opacity 0.2s ease-in-out;
+  }
+  .modal-enter-active .modal-content {
+    transform: scale(1);
+    opacity: 1;
+    transition: transform 0.2s ease-in-out, opacity 0.2s ease-in-out;
+  }
+}
+
+@layer utilities {
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .animate-spin-slow {
+    animation: spin 1.2s linear infinite;
+  }
+
+  @keyframes pulse-slow {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.7; }
+  }
+  .animate-pulse-slow {
+    animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* A spinner is the loading indicator: keep it turning, only slower. */
+  .animate-spin {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* main takes focus only from the skip link; a ring around the whole page is noise. */
+#main-content:focus { outline: none; }

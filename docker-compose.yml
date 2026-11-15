@@ -1,0 +1,41 @@
+# The local Postgres stack is managed separately by the Supabase CLI
+# (`supabase start` / `supabase stop`), not by this file.
+#
+# Note: 127.0.0.1 inside a container is the container itself, so the backend
+# reaches the host-published Supabase Postgres via host.docker.internal. That
+# override wins over DATABASE_URL in backend/.env.
+#
+# Ports are published on the host's loopback only. Inside the container every
+# request arrives from a Docker gateway address, so the backend allows the
+# private ranges; the loopback-only publish is what keeps the LAN out. For LAN
+# access use docker-compose.prod.yml instead.
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+      ALLOWED_CLIENT_NETWORKS: '["127.0.0.0/8","::1/128","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    env_file: ./frontend/.env
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - backend

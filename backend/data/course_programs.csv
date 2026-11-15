@@ -1,0 +1,13 @@
+# Course programs in scope. Thesis §1.4 fixes these three: Applied Mathematics
+# and Data Science are excluded, not for scope-fit reasons, but because there is
+# not yet enough prior scheduling history to support pattern extraction.
+#
+# A course program is catalog data. It carries no term_id, is created once, and
+# persists across every term.
+#
+# program_code  up to 20 characters, the code DCISM writes on a schedule
+# program_name  up to 150 characters
+program_code,program_name
+BSCS,Bachelor of Science in Computer Science
+BSIT,Bachelor of Science in Information Technology
+BSIS,Bachelor of Science in Information Systems

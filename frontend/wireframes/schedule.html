@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html class="light" lang="en" style="">
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Master Schedule | Chronos Scheduling</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "outline": "#727785", "on-secondary": "#ffffff", "on-error": "#ffffff", "tertiary-fixed-dim": "#ffb786",
+                "outline-variant": "#c2c6d6", "surface-container-low": "#f2f4f6", "surface-container-highest": "#e0e3e5",
+                "error": "#ba1a1a", "surface-container-lowest": "#ffffff", "surface-tint": "#005ac2",
+                "inverse-surface": "#2d3133", "on-tertiary-fixed-variant": "#723600", "inverse-primary": "#adc6ff",
+                "inverse-on-surface": "#eff1f3", "primary-container": "#2170e4", "surface-dim": "#d8dadc",
+                "tertiary": "#924700", "on-primary": "#ffffff", "on-secondary-fixed": "#0b1c30",
+                "surface-bright": "#f7f9fb", "tertiary-fixed": "#ffdcc6", "secondary": "#505f76",
+                "primary-fixed": "#d8e2ff", "on-surface-variant": "#424754", "on-primary-fixed-variant": "#004395",
+                "on-error-container": "#93000a", "on-secondary-fixed-variant": "#38485d", "error-container": "#ffdad6",
+                "primary-fixed-dim": "#adc6ff", "on-primary-fixed": "#001a42", "on-tertiary": "#ffffff",
+                "secondary-fixed-dim": "#b7c8e1", "secondary-container": "#d0e1fb", "surface-container": "#eceef0",
+                "surface-container-high": "#e6e8ea", "background": "#f7f9fb", "on-tertiary-container": "#fffbff",
+                "secondary-fixed": "#d3e4fe", "surface-variant": "#e0e3e5", "surface": "#f7f9fb",
+                "on-background": "#191c1e", "tertiary-container": "#b75b00", "on-primary-container": "#fefcff",
+                "on-tertiary-fixed": "#311400", "on-surface": "#191c1e", "primary": "#0058be",
+                "on-secondary-container": "#54647a"
+            },
+            "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+            "spacing": { "margin-desktop": "32px", "margin-mobile": "16px", "max-width": "1440px", "gutter": "16px", "unit": "4px" },
+            "fontFamily": {
+                "body-sm": ["IBM Plex Sans"], "headline-md": ["Space Grotesk"], "body-md": ["IBM Plex Sans"],
+                "body-lg": ["IBM Plex Sans"], "headline-lg": ["Space Grotesk"], "label-md": ["IBM Plex Sans"],
+                "mono-data": ["IBM Plex Mono"], "headline-xl": ["Space Grotesk"]
+            },
+            "fontSize": {
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                "headline-lg": ["30px", {"lineHeight": "36px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                "mono-data": ["13px", {"lineHeight": "18px", "fontWeight": "450"}],
+                "headline-xl": ["40px", {"lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f2f4f6; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #c2c6d6; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #aeb3c2; }
+        .conflict-glow { box-shadow: 0 0 15px rgba(186, 26, 26, 0.2); }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+        
+        /* Modal Transitions */
+        #course-modal, #add-course-modal { transition: opacity 0.2s ease-in-out; }
+        #course-modal-content, #add-course-modal-content { transition: transform 0.2s ease-in-out, opacity 0.2s ease-in-out; }
+        .modal-open #course-modal-content, .modal-open #add-course-modal-content { transform: scale(1); opacity: 1; }
+        .modal-closed #course-modal-content, .modal-closed #add-course-modal-content { transform: scale(0.95); opacity: 0; }
+        
+        /* Dropdown Animation */
+        #edit-properties-content { transition: max-height 0.3s ease-in-out, padding 0.3s ease-in-out, opacity 0.3s ease-in-out; max-height: 0; opacity: 0; overflow: hidden; padding-top: 0; padding-bottom: 0; border-top-width: 0; }
+        #edit-properties-content.open { max-height: 400px; opacity: 1; padding-top: 1rem; padding-bottom: 1rem; border-top-width: 1px; }
+        #edit-prop-icon { transition: transform 0.3s ease; }
+        #edit-prop-icon.open { transform: rotate(180deg); }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md selection:bg-primary/20 vc-init h-screen overflow-hidden flex">
+
+    <!-- Unified Sidebar wrapper -->
+    <aside class="w-[260px] shrink-0 h-screen bg-surface-container-low border-r border-outline-variant flex flex-col py-4 z-50 overflow-y-auto fixed left-0 top-0">
+        <div class="px-6 py-6 mb-4 shrink-0">
+            <h1 class="font-headline-md text-headline-md font-bold text-on-surface tracking-tight">Chronos</h1>
+            <p class="font-label-md text-primary uppercase tracking-widest mt-1">USC DCISM Command</p>
+        </div>
+        <nav class="flex-1 px-4 space-y-2 shrink-0">
+            <a class="flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant font-medium border-l-4 border-transparent hover:bg-surface-container-highest transition-colors" href="dashboard.html">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span class="font-body-md">Ops Dashboard</span>
+            </a>
+            <!-- Active Link -->
+            <a class="flex items-center gap-3 px-4 py-3 rounded-xl text-primary font-bold border-l-4 border-primary bg-primary-fixed/30 transition-colors" href="schedule.html">
+                <span class="material-symbols-outlined">calendar_view_month</span>
+                <span class="font-body-md">Master Schedule</span>
+            </a>
+            <a class="flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant font-medium border-l-4 border-transparent hover:bg-surface-container-highest transition-colors" href="roster.html">
+                <span class="material-symbols-outlined">groups</span>
+                <span class="font-body-md">Faculty Roster</span>
+            </a>
+            <a class="flex items-center gap-3 px-4 py-3 rounded-xl text-on-surface-variant font-medium border-l-4 border-transparent hover:bg-surface-container-highest transition-colors" href="room.html">
+                <span class="material-symbols-outlined">meeting_room</span>
+                <span class="font-body-md">Rooms Terminal</span>
+            </a>
+        </nav>
+        <div class="px-4 mt-auto space-y-2 pb-6 pt-4 shrink-0 border-t border-outline-variant/30">
+            <a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant font-medium hover:bg-surface-container-highest rounded transition-colors text-sm" href="#">
+                <span class="material-symbols-outlined text-[20px]">settings</span><span>Settings</span>
+            </a>
+            <a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant font-medium hover:bg-surface-container-highest rounded transition-colors text-sm" href="#">
+                <span class="material-symbols-outlined text-[20px]">help</span><span>Support</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Right Side Layout Wrapper -->
+    <div class="flex-1 flex flex-col h-screen overflow-hidden min-w-[800px] bg-background ml-[260px]">
+        
+        <!-- Standardized Top App Bar -->
+        <header class="h-[64px] shrink-0 bg-surface-bright border-b border-outline-variant flex items-center justify-between px-8 z-40 overflow-x-auto">
+            <div class="flex items-center gap-8 shrink-0">
+                <span class="font-headline-md text-[18px] text-primary tracking-tight pr-6 border-r border-outline-variant">Chronos System</span>
+                <nav class="flex gap-6 shrink-0">
+                    <span class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-all py-5 border-b-2 border-transparent hover:border-primary cursor-pointer uppercase">Semester: Fall 2024</span>
+                    <span class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-all py-5 border-b-2 border-transparent hover:border-primary cursor-pointer uppercase">Department: DCISM</span>
+                </nav>
+            </div>
+            
+            <div class="flex items-center gap-4 shrink-0 pl-6 border-l border-outline-variant ml-6">
+                <button id="sync-btn" class="flex items-center gap-2 px-4 py-1.5 border border-outline-variant text-on-surface font-label-md text-[12px] uppercase tracking-wider hover:border-primary transition-all active:scale-95 rounded bg-surface-container-highest">
+                    <span class="material-symbols-outlined text-[18px]">sync</span> Sync Data
+                </button>
+                <div class="flex items-center gap-2 ml-4 pl-4 border-l border-outline-variant">
+                    <button class="p-2 text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">schedule</span></button>
+                    <button class="p-2 text-on-surface-variant hover:text-primary transition-colors relative">
+                        <span class="material-symbols-outlined">notifications_active</span>
+                        <span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border border-surface-bright"></span>
+                    </button>
+                    <button class="p-2 text-primary transition-colors"><span class="material-symbols-outlined">account_circle</span></button>
+                </div>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-x-auto bg-surface-bright flex flex-col">
+            <div class="min-w-[1024px] flex flex-col h-full flex-1">
+                
+                <main class="flex-1 flex flex-col p-6 overflow-hidden relative">
+                    
+                    <!-- Unified Command & Filter Panel -->
+                    <div class="flex flex-col gap-4 mb-5 shrink-0 z-30 relative">
+                        
+                        <!-- Top Row: Global Search & Add Course -->
+                        <div class="flex items-center gap-4">
+                            <div class="relative flex-1 max-w-2xl">
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-outline material-symbols-outlined text-[20px]">search</span>
+                                <input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-10 pr-16 py-2.5 focus:border-primary focus:ring-1 focus:ring-primary font-body-sm text-on-surface transition-all shadow-sm" placeholder="Search Master Schedule (Courses, Faculty, Rooms)..." type="text"/>
+                                <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
+                                    <kbd class="border border-outline-variant bg-surface-container text-outline px-1.5 py-0.5 rounded text-[10px] font-mono-data">⌘</kbd>
+                                    <kbd class="border border-outline-variant bg-surface-container text-outline px-1.5 py-0.5 rounded text-[10px] font-mono-data">K</kbd>
+                                </div>
+                            </div>
+                            <button onclick="openAddCourseModal()" class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#005ac2] text-white font-bold hover:bg-[#004b9e] active:scale-95 transition-all shadow-sm text-[13px] whitespace-nowrap tracking-wide cursor-pointer">
+                                <span class="material-symbols-outlined text-[18px]">add_circle</span> Add New Course
+                            </button>
+                            
+                            <div class="ml-auto flex gap-3 shrink-0">
+                                <button class="bg-primary text-on-primary font-label-md px-6 py-2.5 rounded shadow-sm hover:brightness-110 active:scale-[0.98] transition-all uppercase tracking-wider flex items-center gap-2 whitespace-nowrap cursor-pointer">
+                                    <span class="material-symbols-outlined text-[20px]">auto_mode</span> Optimize Schedule
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Row: Filters & Legend -->
+                        <div class="flex flex-wrap items-center justify-between gap-4 bg-surface-container-lowest p-3 rounded-lg border border-outline-variant shadow-sm">
+                            <div class="flex items-center gap-6">
+                                <div class="flex items-center gap-2">
+                                    <label class="font-label-md text-on-surface-variant px-1 uppercase text-[10px] tracking-wider">Building</label>
+                                    <select class="bg-surface-bright border border-outline-variant text-on-surface rounded px-3 py-1.5 text-sm focus:ring-1 focus:ring-primary outline-none cursor-pointer min-w-[140px]">
+                                        <option>Bunzel (LB)</option>
+                                        <option>Talamban (TC)</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <label class="font-label-md text-on-surface-variant px-1 uppercase text-[10px] tracking-wider">Days</label>
+                                    <div class="flex border border-outline-variant rounded overflow-hidden bg-surface-bright h-[34px]">
+                                        <button class="day-filter-btn px-4 bg-primary/10 text-primary font-mono-data text-[12px] font-bold border-r border-outline-variant hover:bg-primary/20 transition-colors cursor-pointer">MW</button>
+                                        <button class="day-filter-btn px-4 text-on-surface-variant font-mono-data text-[12px] font-medium border-r border-outline-variant hover:bg-surface-container-highest transition-colors cursor-pointer">TTh</button>
+                                        <button class="day-filter-btn px-4 text-on-surface-variant font-mono-data text-[12px] font-medium border-r border-outline-variant hover:bg-surface-container-highest transition-colors cursor-pointer">F</button>
+                                        <button class="day-filter-btn px-4 text-on-surface-variant font-mono-data text-[12px] font-medium hover:bg-surface-container-highest transition-colors cursor-pointer">S</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-6">
+                                <div class="flex items-center gap-4 border-r border-outline-variant pr-6">
+                                    <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-primary shrink-0"></div><span class="font-label-md text-[10px] uppercase text-on-surface-variant">Validated</span></div>
+                                    <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-error shrink-0"></div><span class="font-label-md text-[10px] uppercase text-on-surface-variant">Conflict</span></div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button class="w-8 h-8 flex items-center justify-center bg-surface-bright text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-highest transition-colors cursor-pointer"><span class="material-symbols-outlined text-[18px]">zoom_out</span></button>
+                                    <button class="w-8 h-8 flex items-center justify-center bg-surface-bright text-on-surface-variant border border-outline-variant rounded hover:bg-surface-container-highest transition-colors cursor-pointer"><span class="material-symbols-outlined text-[18px]">zoom_in</span></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Master Schedule Grid Display -->
+                    <section class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col flex-1 shadow-sm shrink-0">
+                        <div class="flex border-b border-outline-variant bg-surface-container-low overflow-hidden shrink-0">
+                            <div class="w-[120px] sm:w-[180px] shrink-0 border-r border-outline-variant flex items-center justify-center p-2 sm:p-4 bg-surface-container-highest z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                                <span class="font-label-md text-on-surface font-bold uppercase text-[10px] sm:text-[12px] text-center">Room \ Time</span>
+                            </div>
+                            <div class="flex-1 overflow-x-hidden flex" id="time-header">
+                                <script>
+                                    const header = document.currentScript.parentElement;
+                                    for(let i=7; i<=21; i++) {
+                                        ['00', '30'].forEach(m => {
+                                            if(i === 7 && m === '00') return; 
+                                            if(i === 21 && m === '30') return;
+                                            
+                                            let hour = i % 12 || 12;
+                                            let ampm = i < 12 ? 'AM' : 'PM';
+                                            let displayHour = hour < 10 ? '0' + hour : hour;
+                                            let timeStr = `${displayHour}:${m} ${ampm}`;
+
+                                            const div = document.createElement('div');
+                                            div.className = 'w-[80px] sm:w-[120px] shrink-0 border-r border-outline-variant/30 flex items-center justify-center py-3 sm:py-4 px-1 sm:px-2';
+                                            div.innerHTML = `<span class="font-mono-data text-on-surface-variant text-[10px] sm:text-[13px] whitespace-nowrap">${timeStr}</span>`;
+                                            header.appendChild(div);
+                                        });
+                                    }
+                                </script>
+                            </div>
+                        </div>
+                        
+                        <div class="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar flex flex-col relative" id="grid-rows">
+                            <script>
+                                const rooms = [
+                                    { id: 'LB 483', type: 'LEC', cap: 45 },
+                                    { id: 'LB 484', type: 'LEC', cap: 45 },
+                                    { id: 'LB 485', type: 'LEC', cap: 45 },
+                                    { id: 'LB 486', type: 'LEC', cap: 45 },
+                                    { id: 'LB 467', type: 'LAB', cap: 25 },
+                                    { id: 'LB 468', type: 'LAB', cap: 25 },
+                                    { id: 'LB 469', type: 'LAB', cap: 25 },
+                                    { id: 'LB 470', type: 'LAB', cap: 25 },
+                                    { id: 'LB 443', type: 'LAB', cap: 25 },
+                                    { id: 'LB 445', type: 'LAB', cap: 25 },
+                                    { id: 'LB 446', type: 'LAB', cap: 25 },
+                                    { id: 'LB 447', type: 'LAB', cap: 25 },
+                                    { id: 'LB 448', type: 'LAB', cap: 25 },
+                                    { id: 'LB 304', type: 'LEC', cap: 45 },
+                                    { id: 'LB 305', type: 'LEC', cap: 45 },
+                                    { id: 'LB 306', type: 'LEC', cap: 45 }
+                                ];
+                                
+                                const container = document.currentScript.parentElement;
+                                
+                                container.addEventListener('scroll', () => {
+                                    document.getElementById('time-header').scrollLeft = container.scrollLeft;
+                                });
+
+                                rooms.forEach((room) => {
+                                    const row = document.createElement('div');
+                                    row.className = 'flex border-b border-outline-variant/40 hover:bg-surface-container-low transition-colors w-max min-w-full';
+                                    
+                                    let roomCol = `<div class="w-[120px] sm:w-[180px] shrink-0 border-r border-outline-variant bg-surface-container-low p-2 sm:p-4 flex flex-col justify-center sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                                        <span class="font-mono-data text-[12px] sm:text-[14px] font-bold text-on-surface truncate">${room.id}</span>
+                                        <span class="font-label-md text-[8px] sm:text-[10px] text-on-surface-variant truncate">${room.type} / CAP: ${room.cap}</span>
+                                    </div>`;
+                                    
+                                    let cells = `<div class="flex relative overflow-visible">`;
+                                    
+                                    if(room.id === 'LB 483') {
+                                        cells += `
+                                            <div class="absolute left-0 w-[240px] sm:w-[360px] h-full p-0.5 sm:p-1 z-20">
+                                                <div onclick="openCourseModal()" class="h-full bg-primary/5 border-l-[3px] sm:border-l-4 border-primary flex flex-col justify-center px-1.5 sm:px-3 rounded-sm group cursor-pointer transition-all hover:bg-primary/10 hover:shadow-md">
+                                                    <div class="font-mono-data text-[10px] sm:text-[12px] text-primary font-bold truncate">CS2101</div>
+                                                    <div class="font-body-sm text-[9px] sm:text-[11px] text-on-surface-variant truncate">Algorithms - Dr. Singson</div>
+                                                </div>
+                                            </div>
+                                            <div class="absolute left-[240px] sm:left-[360px] w-[240px] sm:w-[360px] h-full p-0.5 sm:p-1 z-20">
+                                                <div onclick="openCourseModal()" class="h-full bg-primary/5 border-l-[3px] sm:border-l-4 border-primary flex flex-col justify-center px-1.5 sm:px-3 rounded-sm hover:bg-primary/10 cursor-pointer hover:shadow-md transition-all">
+                                                    <div class="font-mono-data text-[10px] sm:text-[12px] text-primary font-bold truncate">GE-MATH</div>
+                                                    <div class="font-body-sm text-[9px] sm:text-[11px] text-on-surface-variant truncate">Prof. Reyes</div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    if(room.id === 'LB 467') {
+                                        cells += `
+                                            <div class="absolute left-0 w-[400px] sm:w-[600px] h-full p-0.5 sm:p-1 z-20">
+                                                <div onclick="openCourseModal()" class="h-full bg-secondary-container/20 border-l-[3px] sm:border-l-4 border-secondary flex flex-col justify-center px-1.5 sm:px-3 rounded-sm hover:bg-secondary-container/30 cursor-pointer hover:shadow-md transition-all">
+                                                    <div class="font-mono-data text-[10px] sm:text-[12px] text-on-secondary-container font-bold truncate">IT3202-LAB</div>
+                                                    <div class="font-body-sm text-[9px] sm:text-[11px] text-on-surface-variant truncate">Web Dev - Dr. Lim</div>
+                                                </div>
+                                            </div>
+                                            <div class="absolute left-[400px] sm:left-[600px] w-[400px] sm:w-[600px] h-full p-0.5 sm:p-1 z-20">
+                                                <div onclick="openCourseModal()" class="h-full bg-primary/5 border-l-[3px] sm:border-l-4 border-primary flex flex-col justify-center px-1.5 sm:px-3 rounded-sm hover:bg-primary/10 cursor-pointer hover:shadow-md transition-all">
+                                                    <div class="font-mono-data text-[10px] sm:text-[12px] text-primary font-bold truncate">CS3101-LAB</div>
+                                                    <div class="font-body-sm text-[9px] sm:text-[11px] text-on-surface-variant truncate">Operating Systems - Dr. Aranas</div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    if(room.id === 'LB 443') {
+                                        cells += `
+                                            <div class="absolute left-[480px] sm:left-[720px] w-[400px] sm:w-[600px] h-full p-0.5 sm:p-1 z-30">
+                                                <div onclick="openCourseModal()" class="h-full bg-error-container/40 border-l-[3px] sm:border-l-4 border-error conflict-glow flex flex-col justify-center px-1.5 sm:px-3 rounded-sm cursor-pointer hover:bg-error-container/60 transition-all hover:shadow-md">
+                                                    <div class="flex items-center gap-1 font-mono-data text-[10px] sm:text-[12px] text-error font-bold truncate">
+                                                        <span class="material-symbols-outlined text-[14px] sm:text-[16px]">report</span> MATH101 (LAB)
+                                                    </div>
+                                                    <div class="font-body-sm text-[9px] sm:text-[11px] text-on-error-container truncate">CONFLICT: OVERLAP</div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+
+                                    for(let i=0; i<28; i++) {
+                                        cells += `<div class="w-[80px] sm:w-[120px] shrink-0 h-[48px] sm:h-[60px] border-r border-outline-variant/10 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-primary/5 cursor-crosshair">
+                                            <span class="material-symbols-outlined text-primary/40 text-[16px] sm:text-[18px]">add_circle</span>
+                                        </div>`;
+                                    }
+                                    cells += `</div>`;
+                                    row.innerHTML = roomCol + cells;
+                                    container.appendChild(row);
+                                });
+                            </script>
+                        </div>
+                    </section>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- 
+      ADD NEW COURSE MODAL
+    -->
+    <div id="add-course-modal" class="fixed inset-0 z-[100] flex hidden items-center justify-center p-4 modal-closed">
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-[#0b1c30]/60 backdrop-blur-sm cursor-pointer" onclick="closeAddCourseModal()"></div>
+        
+        <!-- Modal Container -->
+        <div id="add-course-modal-content" class="relative bg-surface-container-lowest w-full max-w-lg rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden z-10 my-auto">
+            
+            <!-- Header -->
+            <div class="px-6 py-5 border-b border-outline-variant flex justify-between items-center bg-surface-bright shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="material-symbols-outlined text-primary text-[24px]">add_circle</span>
+                    <h2 class="font-headline-md text-[20px] text-on-surface tracking-tight leading-tight">Add New Course</h2>
+                </div>
+                <button onclick="closeAddCourseModal()" class="text-on-surface-variant hover:text-error transition-colors p-2 rounded-full hover:bg-error-container/50">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <!-- Scrollable Body Area -->
+            <div class="p-6 overflow-y-auto custom-scrollbar space-y-6 flex-1">
+                
+                <!-- Subject Details -->
+                <div class="grid grid-cols-2 gap-5">
+                    <div class="space-y-1.5 col-span-2 sm:col-span-1">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[11px] block">Course Code</label>
+                        <input type="text" placeholder="e.g., CS3101" class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2.5 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all">
+                    </div>
+                    <div class="space-y-1.5 col-span-2 sm:col-span-1">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[11px] block">Course Type</label>
+                        <select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2.5 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer">
+                            <option>Lecture (LEC)</option>
+                            <option>Laboratory (LAB)</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5 col-span-2">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[11px] block">Descriptive Title</label>
+                        <input type="text" placeholder="e.g., Operating Systems & Architecture" class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2.5 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all">
+                    </div>
+                </div>
+
+                <hr class="border-outline-variant/40">
+
+                <!-- Instructor & Room Setup -->
+                <div class="grid grid-cols-2 gap-5">
+                    <div class="space-y-1.5">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[11px] block">Assign Instructor</label>
+                        <select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2.5 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer">
+                            <option value="" disabled selected>Select Faculty...</option>
+                            <option>Dr. Rico Aranas</option>
+                            <option>Prof. Mary Chua</option>
+                            <option>Dr. Elena Lim</option>
+                            <option>Eng. Roberto Castro</option>
+                        </select>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[11px] block">Assign Room</label>
+                        <select class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2.5 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer">
+                            <option value="" disabled selected>Select Room...</option>
+                            <optgroup label="Lecture Rooms (Cap: 45)">
+                                <option>LB 483</option>
+                                <option>LB 484</option>
+                                <option>LB 485</option>
+                                <option>LB 486</option>
+                                <option>LB 304</option>
+                                <option>LB 305</option>
+                                <option>LB 306</option>
+                            </optgroup>
+                            <optgroup label="Laboratory Rooms (Cap: 25)">
+                                <option>LB 467</option>
+                                <option>LB 468</option>
+                                <option>LB 469</option>
+                                <option>LB 470</option>
+                                <option>LB 443</option>
+                                <option>LB 445</option>
+                                <option>LB 446</option>
+                                <option>LB 447</option>
+                                <option>LB 448</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Schedule Settings -->
+                <div class="space-y-3 bg-surface-container-low/50 p-4 border border-outline-variant rounded-lg">
+                    <label class="font-label-md text-on-surface font-bold uppercase tracking-wider text-[12px] block mb-2 flex items-center gap-1.5"><span class="material-symbols-outlined text-[16px] text-primary">schedule</span> Schedule Configuration</label>
+                    <div class="space-y-1.5">
+                        <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block">Days</label>
+                        <div class="flex gap-2">
+                            <button class="add-day-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[13px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">MW</button>
+                            <button class="add-day-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[13px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">TTh</button>
+                            <button class="add-day-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[13px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">F</button>
+                            <button class="add-day-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[13px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">S</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <div class="flex-1 space-y-1.5">
+                            <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block">Start Time</label>
+                            <input type="time" value="07:30" class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer">
+                        </div>
+                        <span class="text-outline-variant mt-5 font-bold">-</span>
+                        <div class="flex-1 space-y-1.5">
+                            <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block">End Time</label>
+                            <input type="time" value="09:00" class="w-full bg-surface-container-lowest border border-outline-variant rounded-md px-3 py-2 text-[13px] text-on-surface shadow-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="px-6 py-4 border-t border-outline-variant bg-surface-bright flex justify-end gap-3 shrink-0">
+                <button onclick="closeAddCourseModal()" class="px-4 py-2 rounded-md font-label-md uppercase text-[12px] text-on-surface-variant hover:bg-surface-container-highest transition-colors font-bold border border-transparent tracking-wide cursor-pointer">Cancel</button>
+                <button onclick="closeAddCourseModal()" class="px-6 py-2 rounded-md font-label-md uppercase text-[12px] bg-[#005ac2] text-white hover:bg-[#004b9e] transition-colors font-bold shadow-sm active:scale-95 tracking-wide cursor-pointer flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">save</span> Create Course</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 
+      COURSE EDIT/VIEW MODAL
+    -->
+    <div id="course-modal" class="fixed inset-0 z-[100] flex hidden items-center justify-center p-4 modal-closed">
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-[#0b1c30]/60 backdrop-blur-sm cursor-pointer" onclick="closeCourseModal()"></div>
+        
+        <!-- Modal Container -->
+        <div id="course-modal-content" class="relative bg-surface-container-lowest w-full max-w-[440px] rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden z-10 my-auto">
+            
+            <div class="p-6 border-b border-outline-variant bg-surface-container shrink-0">
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <span class="font-label-md text-primary tracking-widest bg-primary/10 px-2 py-1 rounded uppercase">Active Command</span>
+                        <h2 class="font-headline-lg text-headline-lg mt-2 text-on-surface">CS3101-LAB</h2>
+                        <p class="font-body-md text-on-surface-variant">Operating Systems &amp; Architecture</p>
+                    </div>
+                    <button onclick="closeCourseModal()" class="material-symbols-outlined text-outline hover:text-on-surface transition-colors cursor-pointer">close</button>
+                </div>
+                
+                <!-- Info Grid -->
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="p-3 bg-surface-container-lowest rounded border border-outline-variant shadow-sm">
+                        <span class="font-label-md text-outline block mb-1 uppercase text-[10px]">Instructor</span>
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full bg-secondary"></div>
+                            <span class="font-mono-data text-on-surface text-[13px] truncate">Dr. Aranas</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-surface-container-lowest rounded border border-outline-variant shadow-sm">
+                        <span class="font-label-md text-outline block mb-1 uppercase text-[10px]">Room</span>
+                        <span class="font-mono-data text-on-surface text-[13px]">LB 467 (LAB)</span>
+                    </div>
+                    <div class="p-3 bg-surface-container-lowest rounded border border-outline-variant col-span-2 shadow-sm">
+                        <span class="font-label-md text-outline block mb-1 uppercase text-[10px]">Schedule</span>
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[16px] text-primary">schedule</span>
+                            <span class="font-mono-data text-on-surface text-[13px]">MW 12:30 PM - 03:00 PM</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Command Actions (Updated with Properties Dropdown) -->
+                <div class="flex flex-col gap-3">
+                    
+                    <!-- Edit Properties Dropdown Accordion -->
+                    <div class="border border-outline-variant rounded-md overflow-hidden shadow-sm bg-surface-container-lowest">
+                        <button onclick="toggleEditProperties()" class="w-full flex items-center justify-between px-4 py-2.5 text-primary font-bold hover:bg-surface-container-highest transition-colors text-[14px] cursor-pointer">
+                            <span class="flex items-center gap-2"><span class="material-symbols-outlined text-[18px]">tune</span> Edit Properties</span>
+                            <span id="edit-prop-icon" class="material-symbols-outlined text-[18px]">expand_more</span>
+                        </button>
+                        
+                        <div id="edit-properties-content" class="bg-surface-bright border-outline-variant flex flex-col gap-4 px-4">
+                            <!-- Reassign Instructor -->
+                            <div>
+                                <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block mb-1">Reassign Instructor</label>
+                                <select class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 text-[13px] text-on-surface focus:border-primary focus:ring-1 focus:ring-primary shadow-sm outline-none cursor-pointer">
+                                    <option selected>Dr. Aranas (Current)</option>
+                                    <option>Prof. Mary Chua</option>
+                                    <option>Dr. Elena Lim</option>
+                                </select>
+                            </div>
+                            <!-- Change Room -->
+                            <div>
+                                <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block mb-1">Change Room</label>
+                                <select class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 text-[13px] text-on-surface focus:border-primary focus:ring-1 focus:ring-primary shadow-sm outline-none cursor-pointer">
+                                    <option selected>LB 467 (LAB) - Current</option>
+                                    <option>LB 468 (LAB)</option>
+                                    <option>LB 469 (LAB)</option>
+                                    <option>LB 470 (LAB)</option>
+                                    <option>LB 443 (LAB)</option>
+                                </select>
+                            </div>
+                            <!-- Edit Schedule -->
+                            <div>
+                                <label class="font-label-md text-outline uppercase tracking-wider text-[10px] block mb-1">Edit Schedule</label>
+                                <div class="flex gap-2 mb-2">
+                                    <button class="day-edit-btn flex-1 py-1.5 rounded border border-primary bg-primary/10 text-primary font-bold text-[12px] shadow-sm cursor-pointer">MW</button>
+                                    <button class="day-edit-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[12px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">TTh</button>
+                                    <button class="day-edit-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[12px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">F</button>
+                                    <button class="day-edit-btn flex-1 py-1.5 rounded border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-medium text-[12px] hover:bg-surface-container-highest transition-colors shadow-sm cursor-pointer">S</button>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input type="time" value="12:30" class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-1.5 text-[13px] text-on-surface shadow-sm focus:border-primary cursor-pointer">
+                                    <span class="text-outline-variant">-</span>
+                                    <input type="time" value="15:00" class="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-1.5 text-[13px] text-on-surface shadow-sm focus:border-primary cursor-pointer">
+                                </div>
+                            </div>
+                            <button onclick="toggleEditProperties()" class="w-full px-4 py-2 mt-1 rounded bg-[#005ac2] text-white font-bold text-[12px] hover:bg-[#004b9e] active:scale-95 transition-all shadow-sm cursor-pointer">Apply Changes</button>
+                        </div>
+                    </div>
+
+                    <!-- Destructive Action -->
+                    <button class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-error bg-error text-white font-bold hover:bg-error/90 active:scale-95 transition-all text-[14px] shadow-sm cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">delete_forever</span> Dissolve Course
+                    </button>
+                </div>
+            </div>
+
+            <!-- Qualified Faculty List -->
+            <div class="flex-1 flex flex-col min-h-0 shrink-0 bg-surface-bright">
+                <div class="p-4 flex items-center justify-between shrink-0 border-b border-outline-variant/50">
+                    <h3 class="font-label-md text-on-surface-variant font-bold uppercase text-[11px]">Qualified Replacements</h3>
+                    <span class="font-label-md text-outline uppercase text-[10px]">Match Rank</span>
+                </div>
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+                    
+                    <div class="p-4 bg-surface-container-lowest border border-outline-variant rounded group hover:border-primary transition-colors cursor-pointer shadow-sm">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-primary font-bold font-mono-data">MC</div>
+                                <div>
+                                    <span class="block font-body-md text-on-surface font-semibold text-[14px]">Prof. Mary Chua</span>
+                                    <span class="inline-block mt-1 text-[9px] font-bold text-on-primary bg-[#005ac2] px-2 py-0.5 rounded-full uppercase tracking-wider">Primary Match</span>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="font-mono-data text-tertiary font-bold text-[12px]">12/21 Units</span>
+                                <div class="w-16 h-1.5 bg-surface-container-highest rounded-full mt-1.5">
+                                    <div class="h-full bg-tertiary rounded-full" style="width: 57%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <span class="px-2 py-0.5 bg-surface-container text-[10px] rounded text-on-surface-variant font-label-md uppercase border border-outline-variant/30">OS</span>
+                        </div>
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // Global Day Filter Toggle Logic
+    const dayBtns = document.querySelectorAll('.day-filter-btn');
+    dayBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            dayBtns.forEach(b => {
+                b.classList.remove('bg-primary/10', 'text-primary', 'font-bold');
+                b.classList.add('text-on-surface-variant', 'font-medium');
+                b.classList.remove('hover:bg-primary/20');
+                b.classList.add('hover:bg-surface-container-highest');
+            });
+            e.target.classList.remove('text-on-surface-variant', 'font-medium', 'hover:bg-surface-container-highest');
+            e.target.classList.add('bg-primary/10', 'text-primary', 'font-bold', 'hover:bg-primary/20');
+        });
+    });
+
+    // Dropdown Logic for Edit Properties
+    function toggleEditProperties() {
+        const content = document.getElementById('edit-properties-content');
+        const icon = document.getElementById('edit-prop-icon');
+        content.classList.toggle('open');
+        icon.classList.toggle('open');
+    }
+
+    // Modal Edit Schedule Day Toggles
+    const editDayBtns = document.querySelectorAll('.day-edit-btn');
+    editDayBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            editDayBtns.forEach(b => {
+                b.classList.remove('border-primary', 'bg-primary/10', 'text-primary', 'font-bold');
+                b.classList.add('border-outline-variant', 'bg-surface-container-lowest', 'text-on-surface-variant', 'font-medium');
+            });
+            e.target.classList.remove('border-outline-variant', 'bg-surface-container-lowest', 'text-on-surface-variant', 'font-medium');
+            e.target.classList.add('border-primary', 'bg-primary/10', 'text-primary', 'font-bold');
+        });
+    });
+
+    // Add Course Modal Logic
+    const addCourseModal = document.getElementById('add-course-modal');
+    function openAddCourseModal() {
+        addCourseModal.classList.remove('hidden');
+        setTimeout(() => {
+            addCourseModal.classList.remove('modal-closed');
+            addCourseModal.classList.add('modal-open');
+        }, 10);
+    }
+    function closeAddCourseModal() {
+        addCourseModal.classList.remove('modal-open');
+        addCourseModal.classList.add('modal-closed');
+        setTimeout(() => {
+            addCourseModal.classList.add('hidden');
+        }, 200);
+    }
+    
+    // Add Course Modal Day Toggles
+    const addDayBtns = document.querySelectorAll('.add-day-btn');
+    addDayBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            addDayBtns.forEach(b => {
+                b.classList.remove('border-primary', 'bg-primary/10', 'text-primary', 'font-bold');
+                b.classList.add('border-outline-variant', 'bg-surface-container-lowest', 'text-on-surface-variant', 'font-medium');
+            });
+            e.target.classList.remove('border-outline-variant', 'bg-surface-container-lowest', 'text-on-surface-variant', 'font-medium');
+            e.target.classList.add('border-primary', 'bg-primary/10', 'text-primary', 'font-bold');
+        });
+    });
+
+    // Edit Course Modal Interaction Logic
+    const courseModal = document.getElementById('course-modal');
+    function openCourseModal() {
+        courseModal.classList.remove('hidden');
+        setTimeout(() => {
+            courseModal.classList.remove('modal-closed');
+            courseModal.classList.add('modal-open');
+        }, 10);
+    }
+    function closeCourseModal() {
+        courseModal.classList.remove('modal-open');
+        courseModal.classList.add('modal-closed');
+        setTimeout(() => {
+            courseModal.classList.add('hidden');
+        }, 200);
+    }
+
+    // Sync Button
+    const syncBtn = document.getElementById('sync-btn');
+    if (syncBtn) {
+        syncBtn.addEventListener('click', () => {
+            const originalText = syncBtn.innerHTML;
+            syncBtn.innerHTML = '<span class="material-symbols-outlined text-[18px] animate-spin">sync</span> Syncing...';
+            syncBtn.disabled = true;
+            setTimeout(() => {
+                syncBtn.innerHTML = '<span class="material-symbols-outlined text-[18px]">check</span> Complete';
+                setTimeout(() => { syncBtn.innerHTML = originalText; syncBtn.disabled = false; }, 2000);
+            }, 1500);
+        });
+    }
+</script>
+</body>
+</html>

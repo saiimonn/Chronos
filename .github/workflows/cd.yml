@@ -1,0 +1,104 @@
+name: CD
+
+# Production deployment to the DCISM server (docs/DCISM_DEPLOYMENT.md).
+# A merge into main deploys once the CI workflow passes on that merge commit.
+# A writer can also redeploy the latest main by hand (Actions -> CD -> Run
+# workflow), which needs a passing CI run on that commit too.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  deploy:
+    # Only CI runs started by a push to main (a merge), and only when they
+    # passed. CI runs started by hand do not deploy.
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_branch == 'main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://chronos.dcism.org
+    env:
+      # workflow_run sets GITHUB_SHA to the default branch head, not the commit
+      # CI checked, so the deployed commit is taken from the CI run itself.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Confirm commit is the latest merged main revision
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          merged_prs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$DEPLOY_SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"main\" and .merge_commit_sha == \"$DEPLOY_SHA\")] | length")"
+          test "$merged_prs" -gt 0
+          passed_ci="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&event=push&status=success" \
+            --jq '.total_count')"
+          test "$passed_ci" -gt 0
+          latest_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$DEPLOY_SHA" != "$latest_main" ]]; then
+            # A newer merge landed while CI ran; its own run deploys it.
+            echo "::notice::Skipping $DEPLOY_SHA: main has moved on to $latest_main."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The receiver refuses a number lower than the last deploy's. The run ID
+      # only grows across the repository, so it orders CD runs and is above
+      # every CI run number accepted before deploys moved to this workflow.
+      - name: Deploy verified commit
+        if: steps.verify.outputs.deploy == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          install -m 600 .github/deploy-known-hosts "$HOME/.ssh/known_hosts"
+          pack="$RUNNER_TEMP/deploy.pack"
+          trap 'rm -f "$HOME/.ssh/deploy_key" "$pack"' EXIT
+          {
+            printf '%s\n' "$DEPLOY_SHA"
+            git rev-list --objects "$DEPLOY_SHA^{tree}" |
+              while read -r object _; do printf '%s\n' "$object"; done
+          } | git pack-objects --stdout --no-reuse-delta --window=0 > "$pack"
+          read -r receiver_sha _ < <(sha256sum scripts/deploy/deploy-production)
+          ssh \
+            -i "$HOME/.ssh/deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p 22072 \
+            s11820049@ver.dcism.org \
+            "deploy $DEPLOY_SHA $receiver_sha $GITHUB_RUN_ID" < "$pack"
+
+      - name: Verify public deployment
+        if: steps.verify.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --output /dev/null https://chronos.dcism.org/health
+          deployed="$(curl --fail --silent --show-error https://chronos.dcism.org/deployment.txt)"
+          test "$deployed" = "$DEPLOY_SHA"

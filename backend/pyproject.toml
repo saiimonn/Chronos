@@ -1,0 +1,11 @@
+[project]
+name = "chronos-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["app/tests"]
+markers = [
+    "postgres: requires a dedicated PostgreSQL 17 test database",
+]

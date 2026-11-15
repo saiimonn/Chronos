@@ -1,0 +1,164 @@
+name: CD (test environment)
+
+# Deploys to the developer-only test environment at
+# https://chronos.dcism.org/devtest/ (docs/TEST_ENVIRONMENT.md).
+#
+# Automatically: once the production CD workflow succeeds for a merge into
+# main, the same merged main commit is deployed here too. Test runs after
+# production because production's /devtest/ proxy carries the test site, and
+# so the two builds do not share the server at once.
+#
+# By hand, from main, naming any branch to deploy:
+#   Actions -> "CD (test environment)" -> Run workflow (Use workflow from: main)
+#   gh workflow run cd-test.yml --ref main -f branch=<branch>
+# The next merge into main replaces a hand-deployed branch.
+#
+# It never touches production: the test deploy key's forced command only
+# accepts the "test" target.
+#
+# Required reviewers need a paid plan on a private repository, so instead:
+# - the `test` environment accepts runs from main only (its deployment branch
+#   policy), so this file, and its deployer list, can only change through a
+#   pull request into main; a branch cannot edit its own copy to get in;
+# - the authorize job refuses a hand-started run by anyone not on the
+#   deployer list, before the deploy job reaches the environment and its
+#   secret. Automatic runs deploy only the reviewed, CI-green main commit
+#   production just received, so they need no deployer check.
+on:
+  workflow_run:
+    workflows: [CD]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy to the test environment
+        required: true
+        default: main
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  authorize:
+    # Automatic runs: only after a successful production CD run on main.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the deployer
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DEPLOYER: ${{ github.triggering_actor }}
+        run: |
+          case "$DEPLOYER" in
+            saiimonn|choonhows) echo "Deployer $DEPLOYER is allowed." ;;
+            *)
+              echo "::error::$DEPLOYER may not deploy to test; ask saiimonn or choonhows."
+              exit 1
+              ;;
+          esac
+
+      - name: Automatic deploy of merged main
+        if: github.event_name == 'workflow_run'
+        run: echo "Production CD succeeded; deploying the same main commit to test."
+
+  deploy:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: test-deploy
+      cancel-in-progress: false
+    environment:
+      name: test
+      url: https://chronos.dcism.org/devtest/
+    steps:
+      # The workflow's own commit on main: supplies the reviewed receiver hash
+      # and known_hosts.
+      - uses: actions/checkout@v5
+
+      - name: Fetch the branch to deploy
+        if: github.event_name == 'workflow_dispatch'
+        id: manual
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          git check-ref-format --branch "$BRANCH" >/dev/null
+          git fetch --no-tags --depth=1 origin "refs/heads/$BRANCH"
+          printf 'sha=%s\n' "$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Deploys only what production now runs: the latest main, the merge
+      # commit of a pull request, with a passing CI run. If main moved on, the
+      # newer merge's own CD runs deploy it.
+      - name: Confirm main commit matches production
+        if: github.event_name == 'workflow_run'
+        id: auto
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          deployed="$(curl --fail --silent --show-error https://chronos.dcism.org/deployment.txt)"
+          if [[ "$deployed" != "$sha" ]]; then
+            echo "::notice::Skipping: production runs $deployed, main is $sha."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          merged_prs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"main\" and .merge_commit_sha == \"$sha\")] | length")"
+          test "$merged_prs" -gt 0
+          passed_ci="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success" \
+            --jq '.total_count')"
+          test "$passed_ci" -gt 0
+          git fetch --no-tags --depth=1 origin "$sha"
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy commit
+        id: deploy
+        if: github.event_name == 'workflow_dispatch' || steps.auto.outputs.deploy == 'true'
+        env:
+          TEST_DEPLOY_SSH_KEY: ${{ secrets.TEST_DEPLOY_SSH_KEY }}
+          DEPLOY_SHA: ${{ steps.manual.outputs.sha || steps.auto.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SHA"
+          test -n "$TEST_DEPLOY_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$TEST_DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          install -m 600 .github/deploy-known-hosts "$HOME/.ssh/known_hosts"
+          pack="$RUNNER_TEMP/deploy.pack"
+          trap 'rm -f "$HOME/.ssh/deploy_key" "$pack"' EXIT
+          {
+            printf '%s\n' "$DEPLOY_SHA"
+            git rev-list --objects "$DEPLOY_SHA^{tree}" |
+              while read -r object _; do printf '%s\n' "$object"; done
+          } | git pack-objects --stdout --no-reuse-delta --window=0 > "$pack"
+          # main's receiver: the one installed on the server.
+          read -r receiver_sha _ < <(sha256sum scripts/deploy/deploy-production)
+          ssh \
+            -i "$HOME/.ssh/deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p 22072 \
+            s11820049@ver.dcism.org \
+            "deploy $DEPLOY_SHA $receiver_sha $GITHUB_RUN_ID" < "$pack"
+          printf 'sha=%s\n' "$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployment
+        if: steps.deploy.outcome == 'success'
+        env:
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --output /dev/null https://chronos.dcism.org/devtest/health
+          deployed="$(curl --fail --silent --show-error https://chronos.dcism.org/devtest/deployment.txt)"
+          test "$deployed" = "$DEPLOY_SHA"

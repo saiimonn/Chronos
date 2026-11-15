@@ -1,0 +1,15 @@
+# Synthetic rooms for the seed_scenario test term.
+#
+# room_code      unique
+# building_code  must exist in buildings.csv
+# room_type      lecture (seats 40) or laboratory (seats 20)
+# expanded       true adds five seats
+room_code,building_code,room_type,expanded
+SAB 201,SAB,lecture,false
+SAB 202,SAB,lecture,false
+SAB 203,SAB,lecture,false
+SAB 204,SAB,lecture,true
+STL 101,STL,laboratory,false
+STL 102,STL,laboratory,false
+STL 103,STL,laboratory,false
+STL 104,STL,laboratory,true
