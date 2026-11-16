@@ -26,7 +26,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       range: "0 – 1",
       acceptable: recorded(threshold?.min_support),
       meaning:
-        "How often the teacher and the pattern occur together, out of all teaching records in this stream. A higher value means the pattern appears more frequently.",
+        "A higher value means the pattern appears more frequently.",
     },
     {
       metric: "confidence",
@@ -34,7 +34,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       range: "0 – 1",
       acceptable: recorded(threshold?.min_confidence),
       meaning:
-        "Of the teacher's classes, the share that follow the pattern. A higher value means the pattern is more reliable for that teacher.",
+        "A higher value means the pattern is more reliable for that teacher.",
     },
     {
       metric: "lift",
@@ -42,7 +42,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       range: "> 0",
       acceptable: recorded(threshold?.min_lift),
       meaning:
-        "How much more often the teacher follows the pattern than teachers in general do. A value above 1 means the pattern is specific to that teacher, not just common for everyone.",
+        "A value above 1 means the pattern is specific to that teacher, not just common for everyone.",
     },
     {
       metric: "term_recurrence",
@@ -50,7 +50,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       range: "1 – training terms",
       acceptable: recorded(threshold?.min_term_recurrence),
       meaning:
-        "In how many different academic terms the pattern was observed. A higher value means it has been seen repeatedly across different terms.",
+        "A higher value means it has been seen repeatedly across different terms.",
     },
     {
       metric: "guidance_score",
@@ -58,7 +58,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       range: "0 – 1",
       acceptable: "Higher guidance score means higher priority in GA",
       meaning:
-        "A score that combines how reliable the rule is and how consistently it appears across academic terms. The genetic algorithm uses this score as additional guidance when creating schedules, but it never overrides mandatory scheduling requirements.",
+        "A higher value means higher priority in the GA.",
     },
   ];
 }
