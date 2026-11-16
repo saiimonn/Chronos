@@ -395,12 +395,32 @@ it("stops after the current Block when asked, keeping its proposal", async () =>
   expect(api.submitGAJob).toHaveBeenCalledTimes(1);
 });
 
+it("generates in the chosen order, e.g. Year 1, then 3, then 2", async () => {
+  localStorage.setItem("chronos.generationOrder.v1", JSON.stringify({ groupBy: "year", years: "custom", yearOrder: [1, 3, 2] }));
+  try {
+    succeedEveryRun();
+    renderPage();
+
+    expect(await screen.findByText(/Year 1 → 3 → 2/)).toBeInTheDocument();
+    await startGenerate();
+    await screen.findByText(/Generation finished/);
+
+    expect(vi.mocked(api.submitGAJob).mock.calls.map(([request]) => request.block_id)).toEqual(["block-1", "block-3", "block-2"]);
+  } finally {
+    localStorage.removeItem("chronos.generationOrder.v1");
+  }
+});
+
 it("never generates a locked Block, even when it is selected", async () => {
   vi.mocked(api.getMasterSchedule).mockResolvedValue(masterWithBlockOne);
   succeedEveryRun();
   renderPage();
 
-  await userEvent.click(await screen.findByRole("checkbox", { name: "Select all (3)" }));
+  // Select all skips the locked Block; ticking it by hand still never generates it.
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select all (2)" }));
+  expect(screen.getByText("1 locked Block skipped")).toBeInTheDocument();
+  expect(screen.getByText("2 selected · 2 to generate")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("checkbox", { name: "Select BSCS 1-A" }));
   expect(screen.getByText(/3 selected · 2 to generate · 1 locked \(unlock to generate again\)/)).toBeInTheDocument();
   const button = screen.getByRole("button", { name: "Generate (2)" });
   await waitFor(() => expect(button).toBeEnabled());
@@ -680,7 +700,7 @@ it("lists only free instructors and rooms, and says why the others are hidden", 
   });
   succeedEveryRun();
   renderPage();
-  await generateAll(2);
+  await generateAll(2, 2);
 
   await userEvent.click(gridEntry(/^Edit CS101/));
   const dialog = within(screen.getByRole("dialog"));

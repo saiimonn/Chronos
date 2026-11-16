@@ -26,9 +26,16 @@ from app.domain import (
     LockedAssignment,
     SchedulingProblem,
 )
+from app.domain import SubjectType
 from app.domain.meeting_patterns import meeting_end
 from app.services.ga.chromosome import ChromosomeCodec
 from app.services.ga.config import GAConfig
+from app.services.ga.day_balance import (
+    BALANCED_WEEKDAYS,
+    DayLoad,
+    balanced_days_of,
+    lighter_patterns_first,
+)
 from app.services.ga.operators import GeneSampler
 from app.services.validation import ConstraintEngine, ConstraintEvaluationError
 
@@ -42,6 +49,10 @@ class RepairContext:
     sampler: GeneSampler
     locked_assignments: tuple[LockedAssignment, ...] = ()
     offering_block_ids: Mapping[UUID, Sequence[UUID]] | None = None
+    # Try the meeting pattern on the Block's lighter Monday-Thursday days
+    # first, so repaired offerings even out the week instead of piling onto
+    # the first configured pattern.
+    balance_days: bool = False
 
     @classmethod
     def build(
@@ -50,6 +61,7 @@ class RepairContext:
         config: GAConfig | None = None,
         locked_assignments: Sequence[LockedAssignment] | None = None,
         offering_block_ids: Mapping[UUID, Sequence[UUID]] | None = None,
+        balance_days: bool = False,
     ) -> "RepairContext":
         resolved_config = config if config is not None else GAConfig()
         return cls(
@@ -58,6 +70,7 @@ class RepairContext:
             sampler=GeneSampler(problem, resolved_config),
             locked_assignments=tuple(locked_assignments or ()),
             offering_block_ids=offering_block_ids,
+            balance_days=balance_days,
         )
 
     @classmethod
@@ -135,6 +148,8 @@ class _ClashScreen:
         self._by_faculty: dict[UUID, list[_Meeting]] = {}
         self._by_room: dict[str, list[_Meeting]] = {}
         self._cohort_meetings: list[_Meeting] = []
+        # Minutes the offering's cohorts already teach on Monday-Thursday.
+        self._cohort_load: DayLoad = {day: 0.0 for day in BALANCED_WEEKDAYS}
         offering_units: dict[UUID, dict[UUID, int]] = {}
         for assignment in working.values():
             section = sections[assignment.class_id]
@@ -149,6 +164,9 @@ class _ClashScreen:
                 self._by_room.setdefault(assignment.room_code, []).append(meeting)
             if section.cohort_key in self._cohorts:
                 self._cohort_meetings.append(meeting)
+                minutes = _minutes(meeting)
+                for day in balanced_days_of(assignment.meeting_days or ""):
+                    self._cohort_load[day] += minutes
 
         blocks_by_offering = (
             context.offering_block_ids
@@ -182,6 +200,10 @@ class _ClashScreen:
     def own_cohort_clash(self) -> bool:
         return self._own_cohort_clash
 
+    @property
+    def cohort_load(self) -> DayLoad:
+        return self._cohort_load
+
     def overloaded(self, faculty_id: UUID) -> bool:
         return self._load.get(faculty_id, 0) + self._units > self._max_workload[faculty_id]
 
@@ -191,6 +213,19 @@ class _ClashScreen:
         return meeting is None or not (
             self._clashes(meeting, self._by_faculty.get(faculty_id, ()))
             or self._clashes(meeting, self._cohort_meetings)
+        )
+
+    def spare_room(
+        self,
+        room_pool: Sequence[str],
+        taken_room: str,
+        meeting_days: str,
+        time_slot_id: UUID,
+    ) -> bool:
+        """Another room of the pool is free at this time, besides ``taken_room``."""
+        return any(
+            room != taken_room and self.room_open(room, meeting_days, time_slot_id)
+            for room in room_pool
         )
 
     def room_open(self, room_code: str, meeting_days: str, time_slot_id: UUID) -> bool:
@@ -234,6 +269,11 @@ class _ClashScreen:
             days & other_days and start < other_end and other_start < end
             for other_days, other_start, other_end in others
         )
+
+
+def _minutes(meeting: _Meeting) -> float:
+    _, start, end = meeting
+    return (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
 
 
 @lru_cache(maxsize=None)
@@ -283,8 +323,16 @@ class DeterministicRepairOperator:
             context.locked_assignments,
             context.offering_block_ids,
         )
-        affected_offering_ids = self._class_ids_to_offering_ids(
-            affected_class_ids, codec
+        # A paired LAB placed where no second laboratory is free leaves its
+        # partner Block nowhere to meet, since the two meet at the same time.
+        short = self._paired_labs_without_spare_room(working, context, codec)
+        if short:
+            flagged = set(affected_class_ids) | short
+            affected_class_ids = tuple(c for c in section_order if c in flagged)
+        affected_offering_ids = self._labs_first(
+            self._class_ids_to_offering_ids(affected_class_ids, codec),
+            problem,
+            codec,
         )
 
         repaired: list[UUID] = []
@@ -319,8 +367,12 @@ class DeterministicRepairOperator:
                 assignments=assignments,
                 schedule_id=candidate.schedule_id,
             ),
-            repaired_section_ids=tuple(repaired),
-            unresolved_section_ids=tuple(unresolved),
+            # Reported in stable section order, whatever order repair
+            # visited the offerings in (labs go first).
+            repaired_section_ids=tuple(c for c in section_order if c in set(repaired)),
+            unresolved_section_ids=tuple(
+                c for c in section_order if c in set(unresolved)
+            ),
             report=self._constraint_engine.evaluate(
                 problem,
                 assignments,
@@ -365,6 +417,67 @@ class DeterministicRepairOperator:
             for class_id in section_order
             if class_id in working and class_id in incomplete | conflicted
         )
+
+    @staticmethod
+    def _labs_first(
+        offering_ids: tuple[UUID, ...],
+        problem: SchedulingProblem,
+        codec: ChromosomeCodec,
+    ) -> tuple[UUID, ...]:
+        """LAB offerings before the rest, each group in stable order.
+
+        Laboratories are scarcer than lecture rooms and a lab session is
+        longer, so a LAB repaired after the lectures often finds every lab
+        room or long-enough window already taken by its own Block's lectures.
+        Repairing labs first lets them claim a laboratory, then the lectures
+        fit around them.
+        """
+        lab_subjects = {
+            subject.subject_code
+            for subject in problem.subjects
+            if subject.subject_type is SubjectType.LAB
+        }
+        subject_of = {section.class_id: section.subject_code for section in problem.classes}
+
+        def is_lab(offering_id: UUID) -> bool:
+            return subject_of[codec.class_ids_for(offering_id)[0]] in lab_subjects
+
+        return tuple(o for o in offering_ids if is_lab(o)) + tuple(
+            o for o in offering_ids if not is_lab(o)
+        )
+
+    @staticmethod
+    def _paired_labs_without_spare_room(
+        working: Mapping[UUID, Assignment],
+        context: RepairContext,
+        codec: ChromosomeCodec,
+    ) -> set[UUID]:
+        """Classes of paired LABs whose partner still needs a room at their time.
+
+        Only LABs whose partner is not placed yet count: a placed partner
+        already holds its own room, and the room clash check covers it.
+        """
+        short: set[UUID] = set()
+        seen: set[UUID] = set()
+        for class_id, assignment in working.items():
+            offering_id = codec.offering_for(class_id)
+            if offering_id in seen:
+                continue
+            seen.add(offering_id)
+            class_ids = codec.class_ids_for(offering_id)
+            if not _needs_spare_room(offering_id, class_ids, working, context):
+                continue
+            if assignment.meeting_days is None or assignment.room_code is None:
+                continue
+            screen = _ClashScreen(offering_id, class_ids, working, context)
+            if not screen.spare_room(
+                context.sampler.room_pool(offering_id),
+                assignment.room_code,
+                assignment.meeting_days,
+                assignment.time_slot_id,
+            ):
+                short.update(class_ids)
+        return short
 
     @staticmethod
     def _class_ids_to_offering_ids(
@@ -481,11 +594,29 @@ class DeterministicRepairOperator:
             ),
             None,
         )
-        # Preferred day patterns get a full pass before any fallback pattern.
-        for patterns in sampler.day_pattern_passes(offering_id):
-            yield from _screened_pass(
-                offering_id, class_ids, sampler, screen, partner, patterns
-            )
+        # A paired LAB whose partner is not placed yet first tries only times
+        # where a second laboratory is free for the partner, then, rather than
+        # stay unplaced, the remaining times.
+        spare_modes: tuple[bool | None, ...] = (
+            (True, False)
+            if partner is None
+            and _needs_spare_room(offering_id, class_ids, working, context)
+            else (None,)
+        )
+        for require_spare in spare_modes:
+            # Preferred day patterns get a full pass before any fallback pattern.
+            for patterns in sampler.day_pattern_passes(offering_id):
+                if context.balance_days:
+                    patterns = lighter_patterns_first(patterns, screen.cohort_load)
+                yield from _screened_pass(
+                    offering_id,
+                    class_ids,
+                    sampler,
+                    screen,
+                    partner,
+                    patterns,
+                    require_spare,
+                )
 
     @staticmethod
     def _alternatives(
@@ -562,10 +693,16 @@ def _screened_pass(
     screen: _ClashScreen,
     partner: Assignment | None,
     patterns: Sequence[str],
+    require_spare: bool | None = None,
 ) -> Iterator[Assignment]:
     """One faculty, room, pattern, slot walk over ``patterns``, pruned by
     ``screen``: an overloaded faculty, or a time the faculty or cohort is
-    already busy, drops the whole branch."""
+    already busy, drops the whole branch.
+
+    ``require_spare`` True keeps only placements that leave a second room of
+    the pool free at the same time (for a paired LAB's partner), False only
+    those that do not, None every placement."""
+    room_pool = sampler.room_pool(offering_id)
     for faculty_id in sampler.repair_faculty_order(offering_id):
         if screen.overloaded(faculty_id):
             continue
@@ -584,13 +721,39 @@ def _screened_pass(
         ]
         if not open_times:
             continue
-        for room_code in sorted(sampler.room_pool(offering_id)):
+        for room_code in sorted(room_pool):
             for meeting_days, time_slot_id in open_times:
-                if screen.room_open(room_code, meeting_days, time_slot_id):
-                    yield Assignment(
-                        class_id=class_ids[0],
-                        faculty_id=faculty_id,
-                        time_slot_id=time_slot_id,
-                        room_code=room_code,
-                        meeting_days=meeting_days,
-                    )
+                if not screen.room_open(room_code, meeting_days, time_slot_id):
+                    continue
+                if require_spare is not None and require_spare != screen.spare_room(
+                    room_pool, room_code, meeting_days, time_slot_id
+                ):
+                    continue
+                yield Assignment(
+                    class_id=class_ids[0],
+                    faculty_id=faculty_id,
+                    time_slot_id=time_slot_id,
+                    room_code=room_code,
+                    meeting_days=meeting_days,
+                )
+
+
+def _needs_spare_room(
+    offering_id: UUID,
+    class_ids: Sequence[UUID],
+    working: Mapping[UUID, Assignment],
+    context: RepairContext,
+) -> bool:
+    """A paired LAB whose partner has no placement yet, here or accepted.
+
+    The partner meets at the same time in another laboratory, so this LAB's
+    time must leave one free. An accepted partner pins this LAB's time and
+    already holds its room, so it needs nothing more.
+    """
+    if offering_id in context.problem.paired_lab_placements:
+        return False
+    lab_partners = context.problem.lab_partners
+    return any(
+        class_id in lab_partners and lab_partners[class_id] not in working
+        for class_id in class_ids
+    )

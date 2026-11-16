@@ -18,6 +18,7 @@ from app.services.arm.preprocessing import (
     MiningMode,
     prepare_training_data,
 )
+from app.services.ga.day_balance import DEFAULT_DAY_BALANCE_WEIGHT
 from app.services.ga.engine import GAEngine
 from app.services.ga.fitness import ZeroHistoricalAttainmentScorer
 from app.services.ga.metrics import GARunMetrics
@@ -186,6 +187,10 @@ def _run_ga_block(payload: Mapping[str, Any]) -> JsonObject:
         context,
         decode_ga_config(payload["config"]),
         historical_scorer=scorer,
+        # Master-schedule generation also evens out each Block's week.
+        day_balance_weight=DEFAULT_DAY_BALANCE_WEIGHT,
+        # A proposal must never come back double-booked: see GAEngine.
+        repair_initial_population=True,
     ).run()
     output = _encode_ga_result(
         _encode_candidate(result.candidate),
