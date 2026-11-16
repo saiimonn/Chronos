@@ -46,6 +46,25 @@ class GAConfigRequest(GAConfigParameters):
         return validate_meeting_day_patterns(patterns)
 
 
+class ContextProposalAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    class_id: UUID
+    faculty_id: UUID
+    room_code: str = Field(min_length=1, max_length=20)
+    time_slot_id: UUID
+    meeting_days: str = Field(min_length=1, max_length=10)
+
+
+class ContextProposalEdits(BaseModel):
+    """A context run's proposal as edited by hand in review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: UUID
+    assignments: list[ContextProposalAssignment] = Field(max_length=500)
+
+
 class SubmitGAJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,6 +81,15 @@ class SubmitGAJobRequest(BaseModel):
             "double-book instructors or rooms across its own proposals."
         ),
     )
+    context_edits: list[ContextProposalEdits] = Field(
+        default_factory=list,
+        max_length=500,
+        description=(
+            "The whole proposal of a context run edited by hand in review. It "
+            "is held as context in place of the run's original candidate, so "
+            "a class moved in review is not double-booked by the next Block."
+        ),
+    )
     config: GAConfigRequest | None = Field(
         default=None,
         description="Administrator override; omitted runs use the active saved configuration",
@@ -75,6 +103,11 @@ class SubmitGAJobRequest(BaseModel):
             raise ValueError("context_job_ids requires block_id")
         if len(set(self.context_job_ids)) != len(self.context_job_ids):
             raise ValueError("context_job_ids must contain unique values")
+        edited = [item.job_id for item in self.context_edits]
+        if len(set(edited)) != len(edited):
+            raise ValueError("context_edits must name each run once")
+        if not set(edited) <= set(self.context_job_ids):
+            raise ValueError("context_edits must name runs listed in context_job_ids")
         return self
 
 

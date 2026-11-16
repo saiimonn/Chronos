@@ -91,10 +91,11 @@ def test_conflicting_sections_are_repaired_to_a_conflict_free_candidate():
     assert result.unresolved_section_ids == ()
     assert result.repaired_section_ids == (SECTION_LECTURE_ID, SECTION_LAB_ID)
     assert result.candidate.assignments == (
-        # The lecture moves to its second compatible slot before the LAB
-        # assignment is moved to the only compatible 150-minute slot.
+        # LABs are repaired first: the LAB takes the only compatible
+        # 150-minute slot, after which the lecture's morning slot no longer
+        # clashes and is kept.
         _assignment(
-            SECTION_LECTURE_ID, time_slot_id=SLOT_AFTERNOON_ID, room_code=LECTURE_ROOM
+            SECTION_LECTURE_ID, time_slot_id=SLOT_MORNING_ID, room_code=LECTURE_ROOM
         ),
         _assignment(SECTION_LAB_ID, time_slot_id=SLOT_LAB_ID),
     )
