@@ -866,6 +866,8 @@ function CoverageCharts({
   // subject (days, time slots) show every teacher.
   const subjects = [...new Set(items.map((item) => item.subject_code).filter((code): code is string => !!code))].sort();
   const [chosenSubject, setChosenSubject] = useState("");
+  // What is typed in the search box; null when it should just show the chosen subject.
+  const [query, setQuery] = useState<string | null>(null);
   const subject = subjects.includes(chosenSubject) ? chosenSubject : (subjects[0] ?? "");
   const linked = subject ? items.filter((item) => item.subject_code === subject) : items;
   // Sorting by pattern keeps links near-parallel, so the diagram stays legible.
@@ -901,17 +903,28 @@ function CoverageCharts({
           {subjects.length > 0 && (
             <label className="flex items-center gap-2 text-sm">
               <span>Subject</span>
-              <select
-                value={subject}
-                onChange={(event) => setChosenSubject(event.target.value)}
-                className="border border-outline-variant rounded px-2 py-1 bg-surface-container-lowest"
-              >
+              <input
+                type="search"
+                list={`coverage-subjects-${stream}`}
+                value={query ?? subject}
+                placeholder="Search subject"
+                onFocus={(event) => event.target.select()}
+                onChange={(event) => {
+                  const typed = event.target.value;
+                  setQuery(typed);
+                  const match = subjects.find((code) => code.toLowerCase() === typed.trim().toLowerCase());
+                  if (match) setChosenSubject(match);
+                }}
+                // Text that names no subject is dropped, so the box always shows what the chart shows.
+                onBlur={() => setQuery(null)}
+                className="w-40 border border-outline-variant rounded px-2 py-1 bg-surface-container-lowest"
+              />
+              <datalist id={`coverage-subjects-${stream}`}>
                 {subjects.map((code) => (
-                  <option key={code} value={code}>
-                    {code}
-                  </option>
+                  <option key={code} value={code} />
                 ))}
-              </select>
+              </datalist>
+              <span className="text-xs text-on-surface-variant">{subjects.length} subjects</span>
             </label>
           )}
         </div>
