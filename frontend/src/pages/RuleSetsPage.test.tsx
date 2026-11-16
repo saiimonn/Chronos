@@ -1809,6 +1809,33 @@ describe("teacher coverage", () => {
     expect(cell("Rare Teacher", 6)).toHaveTextContent("No rule");
   });
 
+  it("shows the days a teacher usually teaches, with a differing rule candidate below", async () => {
+    vi.mocked(api.getRuleSetFacultyCoverage).mockResolvedValue({
+      ...COVERAGE,
+      pattern_type: "teacher_day",
+      items: [
+        coverageItem({
+          source_faculty_key: "d",
+          faculty_name: "Day Teacher",
+          subject_code: null,
+          meeting_days: "F",
+          usual_days: "MW",
+          usual_days_count: 10,
+          usual_days_total: 32,
+        }),
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <RuleSetsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("region", { name: "Teacher coverage" });
+    await (await coverageTableAsync()).findByText("Day Teacher");
+    expect(cell("Day Teacher", 0)).toHaveTextContent("MW(10 of 32)Rule candidate: F");
+  });
+
   it("loads the selected stream", async () => {
     render(
       <MemoryRouter>
