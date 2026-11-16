@@ -4,10 +4,17 @@ from dataclasses import replace
 from datetime import time
 from uuid import UUID
 
-from app.domain import TimeSlotDTO, build_offering_block_ids
+from app.domain import (
+    Assignment,
+    CandidateSchedule,
+    ConflictCode,
+    TimeSlotDTO,
+    build_offering_block_ids,
+)
 from app.domain.meeting_patterns import meeting_end, pattern_weekdays
 from app.services.ga import GAConfig, GAEngine, GeneSampler
-from app.services.ga.operators import BLOCK_DAY_SPAN_MINUTES
+from app.services.ga.operators import BLOCK_DAY_SPAN_MINUTES, BLOCK_RUN_LIMIT_MINUTES
+from app.services.validation import ScheduleValidator
 from app.tests.support.ga import GA_TERM_ID, SECTION_LECTURE_ID, make_ga_problem
 
 _OTHER_BLOCK_ID = UUID("00000000-0000-0000-0000-0000000000e0")
@@ -74,6 +81,18 @@ def test_every_block_draws_from_one_eight_hour_window():
         assert meetings
         span = max(end for _, end in meetings) - min(start for start, _ in meetings)
         assert span <= BLOCK_DAY_SPAN_MINUTES
+        assert _longest_run(meetings) < BLOCK_RUN_LIMIT_MINUTES
+
+
+def _longest_run(meetings: list[tuple[int, int]]) -> int:
+    """Longest stretch of touching or overlapping meetings, in minutes."""
+    longest, first, last = 0, None, None
+    for start, end in sorted(meetings):
+        if last is None or start > last:
+            first, last = start, end
+        last = max(last, end)
+        longest = max(longest, last - first)
+    return longest
 
 
 def test_a_full_ga_run_keeps_every_block_day_within_eight_hours():
@@ -105,3 +124,42 @@ def _assert_block_days_within_eight_hours(seed: int) -> None:
     for meetings in days.values():
         span = max(end for _, end in meetings) - min(start for start, _ in meetings)
         assert span <= BLOCK_DAY_SPAN_MINUTES
+        assert _longest_run(meetings) < BLOCK_RUN_LIMIT_MINUTES
+
+
+def _run_conflicts(slot_indexes, *, flag: bool = True):
+    problem = _wide_grid_problem()
+    block_id = problem.classes[0].block_id
+    classes = [c for c in problem.classes if c.block_id == block_id]
+    candidate = CandidateSchedule(
+        term_id=problem.term.term_id,
+        assignments=tuple(
+            Assignment(
+                class_id=section.class_id,
+                faculty_id=problem.faculty[0].faculty_id,
+                time_slot_id=problem.time_slots[index].time_slot_id,
+                room_code=problem.rooms[0].room_code,
+                meeting_days="MW",
+            )
+            for section, index in zip(classes, slot_indexes, strict=False)
+        ),
+    )
+    report = ScheduleValidator().validate(
+        problem, candidate, flag_long_block_runs=flag
+    ).constraint_report
+    return [
+        c for c in report.conflicts if c.code is ConflictCode.BLOCK_CONSECUTIVE_EXCEEDED
+    ]
+
+
+def test_six_hours_of_back_to_back_classes_is_a_violation():
+    # 07:30-13:30 MW: four 1.5h classes in a row, exactly 6 hours, on M and W.
+    conflicts = _run_conflicts([0, 1, 2, 3])
+    assert len(conflicts) == 2
+    assert "07:30-13:30" in conflicts[0].message
+
+
+def test_a_break_or_an_unflagged_check_reports_no_run():
+    # 07:30-12:00 then 13:30-15:00: 4.5h in a row at most.
+    assert _run_conflicts([0, 1, 2, 4]) == []
+    assert _run_conflicts([0, 1, 2, 3], flag=False) == []
