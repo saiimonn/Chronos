@@ -41,16 +41,13 @@ _GENE_SWAP_PROBABILITY = 0.5
 # and never crowds one teacher past their load on every draw.
 PREFERRED_FACULTY_PROBABILITY = 0.75
 # Chance that a class's start slot is drawn from those that keep each of its
-# Blocks' days (first class start to last class end) compact: at most
-# BLOCK_DAY_SPAN_MINUTES, or BLOCK_DAY_SPAN_WITH_BREAK_MINUTES when the day has
-# a break of at least BLOCK_DAY_BREAK_MINUTES. The window follows the Block's
-# own classes, so 07:30-16:30, 09:00-18:00 and 10:30-19:30 all fit. This is a
+# Blocks' days (first class start to last class end) within
+# BLOCK_DAY_SPAN_MINUTES, i.e. a 7-8 hour day. The window follows the Block's
+# own classes, so 07:30-15:30, 09:00-17:00 and 11:30-19:30 all fit. This is a
 # sampling bias only: fitness, hard constraints and repair do not see it, and
 # the remainder keeps every legal slot reachable.
 COMPACT_BLOCK_DAY_PROBABILITY = 0.75
-BLOCK_DAY_SPAN_MINUTES = 9 * 60
-BLOCK_DAY_SPAN_WITH_BREAK_MINUTES = 10 * 60
-BLOCK_DAY_BREAK_MINUTES = 60
+BLOCK_DAY_SPAN_MINUTES = 8 * 60
 
 
 def _minutes(value: time) -> int:
@@ -58,19 +55,9 @@ def _minutes(value: time) -> int:
 
 
 def _compact_day(meetings: Sequence[tuple[int, int]]) -> bool:
-    """True when one Block's meetings on one day keep the day compact."""
-    ordered = sorted(meetings)
-    span = max(end for _, end in ordered) - ordered[0][0]
-    if span <= BLOCK_DAY_SPAN_MINUTES:
-        return True
-    if span > BLOCK_DAY_SPAN_WITH_BREAK_MINUTES:
-        return False
-    latest_end = ordered[0][1]
-    for start, end in ordered[1:]:
-        if start - latest_end >= BLOCK_DAY_BREAK_MINUTES:
-            return True
-        latest_end = max(latest_end, end)
-    return False
+    """True when one Block's meetings on one day span at most 8 hours."""
+    span = max(end for _, end in meetings) - min(start for start, _ in meetings)
+    return span <= BLOCK_DAY_SPAN_MINUTES
 
 
 class GeneSampler:
