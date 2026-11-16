@@ -699,6 +699,9 @@ it("lists only free instructors and rooms, and says why the others are hidden", 
     assignments: [{ ...acceptedBlockOne, record_id: "record-3", class_id: "class-block-3", offering_id: "offering-block-3", block_id: "block-3", subject_code: "CS103", faculty_id: "faculty-2", room_code: "LB 484" }],
   });
   succeedEveryRun();
+  // The other pending proposal meets at another time, so it holds nobody here.
+  vi.mocked(api.previewBlockReplacement).mockImplementation(async (_s, blockId) =>
+    previewFor(blockId, blockId === "block-2" ? { slotId: "slot-2" } : {}));
   renderPage();
   await generateAll(2, 2);
 
@@ -706,7 +709,8 @@ it("lists only free instructors and rooms, and says why the others are hidden", 
   const dialog = within(screen.getByRole("dialog"));
   await userEvent.click(dialog.getByRole("combobox", { name: "Instructor" }));
   expect(dialog.queryByRole("option", { name: /B\. Cruz/ })).not.toBeInTheDocument();
-  expect(dialog.getByRole("option", { name: /A\. Rivera.*0 of 24 units taken/ })).toBeInTheDocument();
+  // Block-2's pending proposal already gives her one class (3 units).
+  expect(dialog.getByRole("option", { name: /A\. Rivera.*3 of 24 units taken/ })).toBeInTheDocument();
   expect(dialog.getByText(/\(\d+ hidden\)/)).toBeInTheDocument();
 
   await userEvent.click(dialog.getByRole("checkbox", { name: "Show all options" }));
@@ -714,6 +718,19 @@ it("lists only free instructors and rooms, and says why the others are hidden", 
   expect(dialog.getByRole("option", { name: /B\. Cruz.*3 of 17 units taken.*busy then \(CS103 BSCS 3-C\)/ })).toBeInTheDocument();
   await userEvent.click(dialog.getByRole("combobox", { name: "Room" }));
   expect(dialog.getByRole("option", { name: /LB 484.*in use then \(CS103 BSCS 3-C\)/ })).toBeInTheDocument();
+});
+
+it("hides a teacher another Block's pending proposal holds at that time", async () => {
+  // Nothing approved: every Block's proposal puts A. Rivera on MW 08:00.
+  succeedEveryRun();
+  renderPage();
+  await generateAll();
+
+  await userEvent.click(gridEntry(/^Edit CS101/));
+  const dialog = within(screen.getByRole("dialog"));
+  await userEvent.click(dialog.getByRole("combobox", { name: "Instructor" }));
+  // She stays listed only as the class's current choice, marked busy.
+  expect(dialog.getByRole("option", { name: /A\. Rivera.*busy then \(CS102/ })).toBeInTheDocument();
 });
 
 it("lets an unplaced class be placed by hand", async () => {
