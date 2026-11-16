@@ -255,13 +255,15 @@ def _reject_ineligible_selection(terms: tuple[HistoricalTerm, ...]) -> None:
         term.snapshot_id
         for term in terms
         if not any(
-            policy.is_eligible(stream, term.academic_year) for stream in PatternStream
+            policy.is_term_eligible(stream, term.academic_year, term.term_number)
+            for stream in PatternStream
         )
     )
     if unusable:
         raise HistoricalSelectionError(
             "One or more selected historical terms are older than every pattern "
-            "stream's earliest academic year and cannot be mined.",
+            "stream's earliest academic year, or are a summer term before "
+            "AY 2023-2024, and cannot be mined.",
             unusable,
         )
 

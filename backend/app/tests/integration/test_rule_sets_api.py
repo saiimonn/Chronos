@@ -894,7 +894,7 @@ def test_rule_set_rules_are_read_only(db_session: Session):
 
 
 
-def _metric_row(rule_set, stream, key, name, *, faculty=None, has_rule, meets, support="0.0100"):
+def _metric_row(rule_set, stream, key, name, *, faculty=None, has_rule, meets, support="0.0100", subject_code="CS101"):
     from app.models.rule_set_faculty_metric import RuleSetFacultyMetric
 
     return RuleSetFacultyMetric(
@@ -903,7 +903,7 @@ def _metric_row(rule_set, stream, key, name, *, faculty=None, has_rule, meets, s
         source_faculty_key=key,
         faculty_id=faculty.faculty_id if faculty else None,
         faculty_name=name,
-        subject_code="CS101" if stream == "teacher_subject" else None,
+        subject_code=subject_code if stream == "teacher_subject" else None,
         room_code=None,
         meeting_days="MWF" if stream == "teacher_day" else None,
         time_slot=None,
@@ -965,6 +965,30 @@ def test_faculty_coverage_returns_recorded_metrics_for_the_stream(db_session: Se
     assert former["faculty_id"] is None
     assert former["on_roster"] is False
     assert former["is_active"] is None
+
+
+def test_faculty_coverage_leaves_out_subjects_not_in_the_catalog(db_session: Session):
+    teacher = _create_faculty(db_session, name="Catalog Teacher")
+    _create_subject(db_session)
+    rs = _create_rule_set(db_session)
+    db_session.add_all(
+        [
+            _metric_row(rs, "teacher_subject", str(teacher.faculty_id), "Catalog Teacher",
+                        faculty=teacher, has_rule=False, meets=(True, True, True, False)),
+            _metric_row(rs, "teacher_subject", "old-key", "Old Curriculum Teacher",
+                        has_rule=False, meets=(True, True, True, False), subject_code="CS 143"),
+        ]
+    )
+    db_session.flush()
+    client = make_api_client(db_session, role="department_administrator")
+
+    body = client.get(
+        f"/api/v1/rule-sets/{rs.rule_set_id}/faculty-coverage",
+        params={"pattern_type": "teacher_subject"},
+    ).json()
+
+    assert body["teacher_count"] == 1
+    assert [item["subject_code"] for item in body["items"]] == ["CS101"]
 
 
 def test_faculty_coverage_falls_back_to_rules_when_no_metrics_were_recorded(db_session: Session):
