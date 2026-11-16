@@ -86,7 +86,9 @@ class GAEngine:
         self._offering_block_ids = offering_block_ids
         self._constraint_engine = constraint_engine or ConstraintEngine()
         self._codec = ChromosomeCodec(problem)
-        self._sampler = GeneSampler(problem, config)
+        self._sampler = GeneSampler(
+            problem, config, locked_assignments=self._locked_assignments
+        )
         self._evaluate = LexicographicFitnessEvaluator(
             problem,
             historical_scorer,
