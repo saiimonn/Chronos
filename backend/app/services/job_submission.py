@@ -1,7 +1,7 @@
 """CHR-31 / CHR-WORKER-001 snapshot-and-enqueue application service."""
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any, Protocol
@@ -72,6 +72,7 @@ def add_proposal_locks(
     context: BlockGenerationContext,
     problem: Any,
     context_job_ids: list[UUID],
+    context_edits: Mapping[UUID, Sequence[Mapping[str, Any]]] | None = None,
 ) -> BlockGenerationContext:
     """Hold other Blocks' unreviewed proposals as extra locked context.
 
@@ -81,6 +82,11 @@ def add_proposal_locks(
     instructor or room among themselves. Accepted assignments of the base
     schedule always win: a class already locked there is never locked twice.
     Nothing is persisted; the proposals still need review and acceptance.
+
+    A proposal edited by hand in review is held as edited (``context_edits``,
+    by job): holding the run's original candidate instead would leave the
+    room, teacher or time a class was moved to looking free, and the next
+    Block could be generated into it.
     """
     if not context_job_ids:
         return context
@@ -118,6 +124,8 @@ def add_proposal_locks(
             )
         candidate = job.result.get("candidate") if isinstance(job.result, dict) else None
         rows = candidate.get("assignments") if isinstance(candidate, dict) else None
+        if context_edits and job_id in context_edits:
+            rows = [dict(row) for row in context_edits[job_id]]
         if not isinstance(rows, list):
             raise GAContextJobError("A context run has no candidate result.", job_id)
         for row in rows:
@@ -354,7 +362,16 @@ class JobSubmissionService:
                 base_schedule_id=request.base_schedule_id,
             )
             context = add_proposal_locks(
-                self._session, context, problem, request.context_job_ids
+                self._session,
+                context,
+                problem,
+                request.context_job_ids,
+                {
+                    item.job_id: [
+                        row.model_dump(mode="json") for row in item.assignments
+                    ]
+                    for item in request.context_edits
+                },
             )
 
         report = analyze_readiness(problem)

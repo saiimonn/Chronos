@@ -55,7 +55,15 @@ class GAEngine:
     deterministic repair (CHR-GA-003) before evaluation, as the thesis
     procedure requires (CHR-GA-005). Repair draws no random numbers, so it
     leaves seeded reproducibility intact. Offspring copied unchanged from a
-    parent skip it: they are either already repaired or initial individuals.
+    repaired parent skip it.
+
+    With ``repair_initial_population`` (master-schedule generation) the
+    initial population is repaired too. Fitness ranks "more offerings placed"
+    above "fewer hard conflicts", so an unrepaired random individual that
+    places everything with a double-booking outranks every repaired,
+    conflict-free one that had to leave an offering out; elitism then carries
+    it to the end of the run and the proposal comes back double-booked. The
+    thesis runs leave it off so their convergence metrics keep their meaning.
     """
 
     def __init__(
@@ -67,8 +75,12 @@ class GAEngine:
         locked_assignments: Sequence[LockedAssignment] | None = None,
         offering_block_ids: Mapping[UUID, Sequence[UUID]] | None = None,
         repair_operator: RepairOperator | None = None,
+        day_balance_weight: float = 0.0,
+        repair_initial_population: bool = False,
     ):
         self._problem = problem
+        self._day_balance_weight = day_balance_weight
+        self._repair_initial_population = repair_initial_population
         self._config = config
         self._locked_assignments = tuple(locked_assignments or ())
         self._offering_block_ids = offering_block_ids
@@ -81,6 +93,7 @@ class GAEngine:
             self._constraint_engine,
             locked_assignments=self._locked_assignments,
             offering_block_ids=self._offering_block_ids,
+            day_balance_weight=day_balance_weight,
         )
         self._repair_operator = repair_operator or DeterministicRepairOperator(
             self._constraint_engine
@@ -91,6 +104,7 @@ class GAEngine:
             sampler=self._sampler,
             locked_assignments=self._locked_assignments,
             offering_block_ids=self._offering_block_ids,
+            balance_days=day_balance_weight > 0,
         )
         _, self._individual_type = register_deap_types()
 
@@ -102,6 +116,8 @@ class GAEngine:
         historical_scorer: HistoricalAttainmentScorer | None = None,
         constraint_engine: ConstraintEngine | None = None,
         repair_operator: RepairOperator | None = None,
+        day_balance_weight: float = 0.0,
+        repair_initial_population: bool = False,
     ) -> "GAEngine":
         return cls(
             problem=context.selected_problem,
@@ -111,6 +127,8 @@ class GAEngine:
             locked_assignments=context.locked_assignments,
             offering_block_ids=context.offering_block_ids,
             repair_operator=repair_operator,
+            day_balance_weight=day_balance_weight,
+            repair_initial_population=repair_initial_population,
         )
 
     def run(self) -> GARunResult:
@@ -118,6 +136,8 @@ class GAEngine:
         rng = Random(self._config.random_seed)
 
         population = initialize_population(self._sampler, self._config, rng)
+        if self._repair_initial_population:
+            population = [self._repaired_individual(item) for item in population]
         self._evaluate_population(population)
         # CHR-GA-006: a feasible run keeps evolving, and with elite_count=0 a
         # later population can lose its best schedule, so the best ever seen
@@ -190,7 +210,11 @@ class GAEngine:
                 required_class_count=len(self._codec.class_ids),
                 assigned_class_count=assigned_class_count,
                 hard_conflict_count=combined_hard_conflict_count,
-                historical_pattern_attainment=best_fitness[2],
+                historical_pattern_attainment=(
+                    self._evaluate.historical_attainment(best)
+                    if self._day_balance_weight
+                    else best_fitness[2]
+                ),
                 selected_hard_conflict_count=selected_hard_conflict_count,
                 combined_hard_conflict_count=combined_hard_conflict_count,
                 cross_block_conflict_count=cross_block_conflict_count,
@@ -234,7 +258,8 @@ class GAEngine:
                 genes = tuple(mutate(genes, self._sampler, self._config, rng))
             # Repair is deterministic and idempotent, so a child identical to
             # an already repaired parent would come back unchanged; skip it.
-            # Initial individuals were never repaired, so a copy of one is
+            # Initial individuals are repaired only with
+            # repair_initial_population, so a copy of an unrepaired one is
             # still repaired even when no operator changed a gene.
             needs_repair = genes != tuple(parent) or not getattr(
                 parent, "repaired", False
@@ -244,6 +269,11 @@ class GAEngine:
             child.repaired = True
             children.append(child)
         return elites + children
+
+    def _repaired_individual(self, genes: Sequence[ScheduleGene]) -> list[ScheduleGene]:
+        individual = self._individual_type(self._repair(genes))
+        individual.repaired = True
+        return individual
 
     def _repair(self, genes: Sequence[ScheduleGene]) -> tuple[ScheduleGene, ...]:
         result = self._repair_operator.repair(
