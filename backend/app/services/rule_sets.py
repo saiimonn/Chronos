@@ -14,6 +14,7 @@ from app.models.faculty import Faculty
 from app.models.historical_snapshot import HistoricalRecord, HistoricalSnapshot
 from app.models.rule_set import RuleSet, rule_set_term
 from app.models.rule_set_faculty_metric import RuleSetFacultyMetric
+from app.models.subject import Subject
 from app.services.arm.preprocessing import HistoricalInclusionPolicy, PatternStream
 from app.services.arm.providers import GuidanceRule, HistoricalGuidance
 from app.services.audit import record_event
@@ -382,6 +383,15 @@ def list_rule_set_faculty_coverage(
                     "meets_term_recurrence": True,
                 }
             )
+
+    # Patterns on a subject no longer in the catalog (old-curriculum codes)
+    # are left out; streams without a subject are unaffected.
+    catalog = set(db.scalars(select(Subject.subject_code)))
+    items = [
+        item
+        for item in items
+        if item["subject_code"] is None or item["subject_code"] in catalog
+    ]
 
     def met(item: dict) -> int:
         return sum(
