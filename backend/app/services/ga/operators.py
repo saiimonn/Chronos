@@ -236,8 +236,9 @@ class GeneSampler:
 
         Blocks that share an Offering share a window. Each group takes the
         window that keeps the most of its Offerings placeable, then the span
-        and break fewest groups use (spreading Blocks eases room and teacher
-        clashes), then the most even break, then the earliest. A window must
+        fewest groups use (spreading Blocks eases room and teacher clashes),
+        then the break that leaves room for the most classes (a mid-morning
+        break can cost a 2.5h lab), then the earliest. A window must
         hold the group's pinned placements, and pinned Offerings keep their
         single legal slot.
         """
@@ -262,8 +263,11 @@ class GeneSampler:
         # enough: classes only run back to back when one starts as the
         # previous one ends.
         step = min((b - a for a, b in zip(starts, starts[1:])), default=30)
-        # How far each window's break sits from an even split, for tie-breaks.
-        uneven: dict[DayWindow, int] = {}
+        lengths = sorted({b - a for a, b in sessions})
+        # How many classes of each length still fit around each window's
+        # break (more is better), then the fewest minutes too short for one,
+        # then how even the split is.
+        fit: dict[DayWindow, tuple[int, int, int]] = {}
 
         def with_breaks(low: int, high: int) -> list[DayWindow]:
             inner = [(a, b) for a, b in sessions if low <= a and b <= high]
@@ -290,7 +294,12 @@ class GeneSampler:
                     and last - (rest + step) < BLOCK_RUN_LIMIT_MINUTES
                 ]
                 for option in options:
-                    uneven[option] = abs((option[2] - first) - (last - option[3]))
+                    before, after = option[2] - first, last - option[3]
+                    fit[option] = (
+                        sum(before // n + after // n for n in lengths),
+                        -sum(before % n + after % n for n in lengths),
+                        -abs(before - after),
+                    )
                 if options:
                     return options
                 # ponytail: no single step splits the stretch under 6h (a
@@ -370,8 +379,8 @@ class GeneSampler:
                 key=lambda w: (
                     placeable(w),
                     -used_span[w[:2]],
+                    fit.get(w, (1 << 30, 0, 0)),
                     -used[w],
-                    -uneven.get(w, 0),
                     -w[0],
                     -w[2],
                 ),
