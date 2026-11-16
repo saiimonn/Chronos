@@ -6,7 +6,7 @@ run is reproducible from its seed alone. DEAP stock operators are not used
 because they draw from the ``random`` module globals.
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from datetime import time
 from random import Random
@@ -83,8 +83,12 @@ class GeneSampler:
         config: GAConfig,
         availability_codec: AvailabilityMaskCodec | None = None,
         locked_assignments: Sequence[LockedAssignment] = (),
+        day_span_minutes: int | None = None,
     ):
         codec = availability_codec or AvailabilityMaskCodec()
+        # The Block day's length; a run that cannot place every class at
+        # 8 hours may be retried longer (see app.services.jobs.handlers).
+        self._day_span = day_span_minutes or BLOCK_DAY_SPAN_MINUTES
         self._config = config
         self._codec = ChromosomeCodec(problem)
         self._offering_ids = self._codec.offering_ids
@@ -259,10 +263,10 @@ class GeneSampler:
             return
         day_end = max(_minutes(slot.end_time) for slot in self._time_slots)
         spans = [
-            (start, start + BLOCK_DAY_SPAN_MINUTES)
+            (start, start + self._day_span)
             for start in starts
-            if start + BLOCK_DAY_SPAN_MINUTES <= day_end
-        ] or [(starts[0], starts[0] + BLOCK_DAY_SPAN_MINUTES)]
+            if start + self._day_span <= day_end
+        ] or [(starts[0], starts[0] + self._day_span)]
         sessions = sorted(
             {meeting(slot.time_slot_id, None) for slot in self._time_slots}
         )
@@ -390,32 +394,53 @@ class GeneSampler:
         units = {s.subject_code: s.units for s in problem.subjects}
         subject_code = {c.class_id: c.subject_code for c in problem.classes}
 
+        own_classes = {section.class_id for section in problem.classes}
+
+        def needs_spare(offering_id: UUID) -> bool:
+            """A paired LAB whose partner Block is not in this run: the partner
+            must later meet at this LAB's exact time, so it needs a second
+            teacher and room free then."""
+            return any(
+                problem.lab_partners.get(class_id) is not None
+                and problem.lab_partners[class_id] not in own_classes
+                for class_id in self._codec.class_ids_for(offering_id)
+            )
+
         def open_times(offering_id: UUID, window: DayWindow) -> int:
             """Start times and patterns with a free teacher who still has room
-            for the class's units, and a free room."""
-            options = set()
+            for the class's units, and a free room; for a paired LAB, two of
+            each, so its partner can follow."""
             # Every pattern the GA may fall back to, not just the preferred one.
             patterns = self._meeting_day_patterns[offering_id]
             rooms = self._room_pools[offering_id]
             needed = units.get(
                 subject_code[self._codec.class_ids_for(offering_id)[0]], 0
             )
+            teachers: dict[tuple[UUID, str], set[UUID]] = defaultdict(set)
+            free_rooms: dict[tuple[UUID, str], int] = {}
             for faculty_id in self._faculty_pools[offering_id]:
                 if carried[faculty_id] + needed > capacity.get(faculty_id, 0):
                     continue
                 for slot_id in inside(offering_id, faculty_id, window):
                     for pattern in patterns:
-                        if (slot_id, pattern) in options:
-                            continue
                         start, end = meeting(slot_id, pattern)
                         if not _fits(window, start, end):
                             continue
                         days = pattern_weekdays(pattern)
-                        if idle(faculty_id, days, start, end) and any(
-                            idle(("room", room), days, start, end) for room in rooms
-                        ):
-                            options.add((slot_id, pattern))
-            return len(options)
+                        if not idle(faculty_id, days, start, end):
+                            continue
+                        key = (slot_id, pattern)
+                        if key not in free_rooms:
+                            free_rooms[key] = sum(
+                                idle(("room", room), days, start, end) for room in rooms
+                            )
+                        teachers[key].add(faculty_id)
+            least = 2 if needs_spare(offering_id) else 1
+            return sum(
+                1
+                for key, who in teachers.items()
+                if len(who) >= least and free_rooms[key] >= least
+            )
 
         used: Counter[DayWindow] = Counter()
         used_span: Counter[tuple[int, int]] = Counter()
