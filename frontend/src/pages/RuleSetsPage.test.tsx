@@ -1522,7 +1522,7 @@ describe("extracted rule review", () => {
     expect(within(guide.getByRole("rowheader", { name: "Confidence" }).closest("tr")!).getByText("≥ 0.60")).toBeInTheDocument();
     expect(within(guide.getByRole("rowheader", { name: "Lift" }).closest("tr")!).getByText("≥ 1.05")).toBeInTheDocument();
     expect(within(guide.getByRole("rowheader", { name: "Terms" }).closest("tr")!).getByText("≥ 2")).toBeInTheDocument();
-    expect(within(guide.getByRole("rowheader", { name: "Guidance score" }).closest("tr")!).getByText(/^No cut-off/)).toBeInTheDocument();
+    expect(within(guide.getByRole("rowheader", { name: "Guidance score" }).closest("tr")!).getByText("Higher guidance score means higher priority in GA")).toBeInTheDocument();
     expect(guide.getByText(/A value above 1 means the pattern is specific to that teacher/)).toBeInTheDocument();
     expect(guide.getByText(/A higher value means the pattern is more reliable for that teacher/)).toBeInTheDocument();
 

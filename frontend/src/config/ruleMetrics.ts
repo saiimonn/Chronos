@@ -56,7 +56,7 @@ export function ruleMetricGuide(threshold: RuleSetThreshold | undefined): RuleMe
       metric: "guidance_score",
       label: "Guidance score",
       range: "0 – 1",
-      acceptable: "No cut-off: every retained rule is used, and a higher score guides the GA more",
+      acceptable: "Higher guidance score means higher priority in GA",
       meaning:
         "A score that combines how reliable the rule is and how consistently it appears across academic terms. The genetic algorithm uses this score as additional guidance when creating schedules, but it never overrides mandatory scheduling requirements.",
     },

@@ -838,9 +838,6 @@ function CoverageMetricCell({ value, meets }: { value: string | number; meets: b
         meets ? "text-emerald-700 dark:text-emerald-300" : "text-error"
       }`}
     >
-      <span aria-hidden="true" className="mr-1">
-        {meets ? "✓" : "✗"}
-      </span>
       <span>{value}</span>
       <span className="sr-only">{meets ? " (meets threshold)" : " (below threshold)"}</span>
     </td>
@@ -865,8 +862,14 @@ function CoverageCharts({
   threshold: RuleSetThreshold | undefined;
   stream: PatternType;
 }) {
+  // One subject at a time keeps the link diagram readable; streams without a
+  // subject (days, time slots) show every teacher.
+  const subjects = [...new Set(items.map((item) => item.subject_code).filter((code): code is string => !!code))].sort();
+  const [chosenSubject, setChosenSubject] = useState("");
+  const subject = subjects.includes(chosenSubject) ? chosenSubject : (subjects[0] ?? "");
+  const linked = subject ? items.filter((item) => item.subject_code === subject) : items;
   // Sorting by pattern keeps links near-parallel, so the diagram stays legible.
-  const rows = [...items].sort(
+  const rows = [...linked].sort(
     (a, b) => describePattern(a).localeCompare(describePattern(b)) || a.faculty_name.localeCompare(b.faculty_name),
   );
   const patterns = [...new Set(rows.map(describePattern))];
@@ -891,9 +894,27 @@ function CoverageCharts({
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <figure className="border border-outline-variant rounded-xl p-3 space-y-2 min-w-0">
-        <figcaption className="text-sm font-label-md">
-          Teacher → {RULE_COLUMN_LABEL[stream][1].toLowerCase()}
-        </figcaption>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <figcaption className="text-sm font-label-md">
+            Teacher → {RULE_COLUMN_LABEL[stream][1].toLowerCase()}
+          </figcaption>
+          {subjects.length > 0 && (
+            <label className="flex items-center gap-2 text-sm">
+              <span>Subject</span>
+              <select
+                value={subject}
+                onChange={(event) => setChosenSubject(event.target.value)}
+                className="border border-outline-variant rounded px-2 py-1 bg-surface-container-lowest"
+              >
+                {subjects.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <div className="max-h-[28rem] overflow-auto">
           <svg
             role="img"
@@ -1231,11 +1252,6 @@ function MetricCell({
   const tone = ok === undefined ? "" : ok ? "text-emerald-700 dark:text-emerald-300" : "text-error";
   return (
     <td className={`text-right px-4 py-2.5 align-top whitespace-nowrap font-mono-data tabular-nums ${tone}`}>
-      {ok !== undefined && (
-        <span aria-hidden="true" className="mr-1">
-          {ok ? "✓" : "✗"}
-        </span>
-      )}
       <span>{value}</span>
       {ok !== undefined && <span className="sr-only">{ok ? " (acceptable)" : " (below acceptable)"}</span>}
     </td>

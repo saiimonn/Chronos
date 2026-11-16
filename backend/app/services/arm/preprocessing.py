@@ -156,8 +156,25 @@ class HistoricalInclusionPolicy:
         PatternStream.TEACHER_SUBJECT_ROOM: 2023,
     }
 
+    # Summer terms (term 3) of the previous curriculum are left out: only
+    # summers from AY 2023-2024 (summer 2024, the current curriculum) onward
+    # are mined.
+    SUMMER_TERM_NUMBER = 3
+    _EARLIEST_SUMMER_START_YEAR = 2023
+
     def is_eligible(self, stream: PatternStream, academic_year: str) -> bool:
         return self._start_year(academic_year) >= self._EARLIEST_START_YEAR[stream]
+
+    def is_term_eligible(
+        self, stream: PatternStream, academic_year: str, term_number: int
+    ) -> bool:
+        """Stream window plus the summer cut-off for one captured term."""
+        if not self.is_eligible(stream, academic_year):
+            return False
+        return (
+            term_number != self.SUMMER_TERM_NUMBER
+            or self._start_year(academic_year) >= self._EARLIEST_SUMMER_START_YEAR
+        )
 
     @classmethod
     def is_parsable_academic_year(cls, academic_year: str) -> bool:
@@ -193,7 +210,9 @@ class HistoricalInclusionPolicy:
                 (
                     term
                     for term in terms
-                    if self.is_eligible(stream, term.academic_year)
+                    if self.is_term_eligible(
+                        stream, term.academic_year, term.term_number
+                    )
                 ),
                 key=self._term_sort_key,
             )
@@ -203,9 +222,10 @@ class HistoricalInclusionPolicy:
         term_numbers: dict[str, set[int]] = {}
         for term in eligible:
             term_numbers.setdefault(term.academic_year, set()).add(term.term_number)
-        required = set(range(1, self.HOLDOUT_TERM_COUNT + 1))
         complete_years = [
-            year for year, numbers in term_numbers.items() if required <= numbers
+            year
+            for year, numbers in term_numbers.items()
+            if self._required_terms(year) <= numbers
         ]
         if not complete_years:
             return HistoricalPartition(
@@ -221,6 +241,13 @@ class HistoricalInclusionPolicy:
             holdout_terms=tuple(term for term in eligible if years_after_holdout(term) == 0),
             unplaced_terms=tuple(term for term in eligible if years_after_holdout(term) > 0),
         )
+
+    def _required_terms(self, academic_year: str) -> set[int]:
+        """Terms a year needs to be complete; a disregarded summer is not one."""
+        required = set(range(1, self.HOLDOUT_TERM_COUNT + 1))
+        if self._start_year(academic_year) < self._EARLIEST_SUMMER_START_YEAR:
+            required.discard(self.SUMMER_TERM_NUMBER)
+        return required
 
     def _term_sort_key(self, term: HistoricalTerm) -> tuple[int, int, str]:
         return (
