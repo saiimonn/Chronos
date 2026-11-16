@@ -709,6 +709,7 @@ export const CONFLICT_CODE_LABEL: Record<string, string> = {
   INVALID_MEETING_PATTERN: "Not an allowed day pattern",
   FACULTY_INACTIVE: "Instructor no longer teaching",
   FACULTY_CONSECUTIVE_EXCEEDED: "Too many classes in a row",
+  ROOM_NOT_ALLOWED: "Room not allowed for subject",
 };
 
 export function conflictLabel(code: string): string {
