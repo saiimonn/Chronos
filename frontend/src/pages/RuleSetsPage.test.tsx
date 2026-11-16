@@ -1522,7 +1522,7 @@ describe("extracted rule review", () => {
     expect(within(guide.getByRole("rowheader", { name: "Confidence" }).closest("tr")!).getByText("≥ 0.60")).toBeInTheDocument();
     expect(within(guide.getByRole("rowheader", { name: "Lift" }).closest("tr")!).getByText("≥ 1.05")).toBeInTheDocument();
     expect(within(guide.getByRole("rowheader", { name: "Terms" }).closest("tr")!).getByText("≥ 2")).toBeInTheDocument();
-    expect(within(guide.getByRole("rowheader", { name: "Guidance score" }).closest("tr")!).getByText(/^No cut-off/)).toBeInTheDocument();
+    expect(within(guide.getByRole("rowheader", { name: "Guidance score" }).closest("tr")!).getByText("Higher guidance score means higher priority in GA")).toBeInTheDocument();
     expect(guide.getByText(/A value above 1 means the pattern is specific to that teacher/)).toBeInTheDocument();
     expect(guide.getByText(/A higher value means the pattern is more reliable for that teacher/)).toBeInTheDocument();
 
@@ -1807,6 +1807,33 @@ describe("teacher coverage", () => {
     expect(cell("Former Teacher", 4)).toHaveClass("text-error");
     expect(cell("Covered Teacher", 6)).toHaveTextContent("Has rule");
     expect(cell("Rare Teacher", 6)).toHaveTextContent("No rule");
+  });
+
+  it("shows the days a teacher usually teaches, with a differing rule candidate below", async () => {
+    vi.mocked(api.getRuleSetFacultyCoverage).mockResolvedValue({
+      ...COVERAGE,
+      pattern_type: "teacher_day",
+      items: [
+        coverageItem({
+          source_faculty_key: "d",
+          faculty_name: "Day Teacher",
+          subject_code: null,
+          meeting_days: "F",
+          usual_days: "MW",
+          usual_days_count: 10,
+          usual_days_total: 32,
+        }),
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <RuleSetsPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("region", { name: "Teacher coverage" });
+    await (await coverageTableAsync()).findByText("Day Teacher");
+    expect(cell("Day Teacher", 0)).toHaveTextContent("MW(10 of 32)Rule candidate: F");
   });
 
   it("loads the selected stream", async () => {

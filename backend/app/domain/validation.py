@@ -23,6 +23,8 @@ class ConflictCode(StrEnum):
     # schedules still being built report it; finalized ones keep past teachers.
     FACULTY_INACTIVE = "FACULTY_INACTIVE"
     FACULTY_CONSECUTIVE_EXCEEDED = "FACULTY_CONSECUTIVE_EXCEEDED"
+    # A class placed in a room outside its subject's allowed rooms.
+    ROOM_NOT_ALLOWED = "ROOM_NOT_ALLOWED"
     # A Block in back-to-back classes for 6 hours or more on one day. Only
     # schedules being built or edited report it; the GA's H(C) does not.
     BLOCK_CONSECUTIVE_EXCEEDED = "BLOCK_CONSECUTIVE_EXCEEDED"
