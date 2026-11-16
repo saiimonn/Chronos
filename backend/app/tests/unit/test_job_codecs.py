@@ -243,6 +243,25 @@ def test_block_generation_context_round_trip_losslessly():
     assert decoded.locked_assignments[0].block_id != decoded.selected_block_id
 
 
+def test_block_generation_context_keeps_subject_rooms_and_patterns():
+    # Dropping these let per-Block runs place a subject outside its allowed
+    # rooms and ignore its preferred day patterns.
+    context = _make_block_generation_context()
+    subjects = tuple(
+        replace(
+            subject,
+            allowed_rooms=frozenset({context.rooms[0].room_code}),
+            preferred_patterns=("TTh",),
+        )
+        for subject in context.subjects
+    )
+    context = replace(context, subjects=subjects)
+
+    decoded = decode_block_generation_context(encode_block_generation_context(context))
+
+    assert decoded.subjects == subjects
+
+
 def test_legacy_locked_assignments_without_offering_identity_still_decode():
     encoded = encode_block_generation_context(_make_block_generation_context())
     for item in encoded["context"]["locked_assignments"]:

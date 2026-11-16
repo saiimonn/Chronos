@@ -564,16 +564,7 @@ def encode_block_generation_context(context: BlockGenerationContext) -> JsonObje
             "faculty": [
                 _encode_faculty(item) for item in context.faculty
             ],
-            "subjects": [
-                {
-                    "subject_code": item.subject_code,
-                    "subject_title": item.subject_title,
-                    "units": item.units,
-                    "subject_type": item.subject_type.value,
-                    "is_active": item.is_active,
-                }
-                for item in context.subjects
-            ],
+            "subjects": [_encode_subject(item) for item in context.subjects],
             "rooms": [
                 {
                     "room_code": item.room_code,
