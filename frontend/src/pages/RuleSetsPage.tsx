@@ -828,7 +828,14 @@ const COVERAGE_METRICS = [
 
 function describePattern(item: RuleSetFacultyCoverageItem): string {
   if (item.room_code) return item.subject_code ? `${item.subject_code} in ${item.room_code}` : item.room_code;
-  return item.subject_code ?? item.meeting_days ?? item.time_slot ?? "—";
+  // Teacher-day shows the days the teacher usually teaches; the lift-ranked
+  // candidate (`meeting_days`) can be a rarer day they teach above average.
+  return item.subject_code ?? item.usual_days ?? item.meeting_days ?? item.time_slot ?? "—";
+}
+
+// The lift-ranked rule candidate, when it differs from the usual days shown.
+function differingCandidate(item: RuleSetFacultyCoverageItem): string | null {
+  return item.usual_days && item.meeting_days && item.meeting_days !== item.usual_days ? item.meeting_days : null;
 }
 
 function CoverageMetricCell({ value, meets }: { value: string | number; meets: boolean }) {
@@ -910,9 +917,11 @@ function CoverageCharts({
               return (
                 <g key={item.source_faculty_key} aria-hidden="true">
                   <title>
-                    {`${item.faculty_name} → ${describePattern(item)}: ${item.has_rule ? "has rule" : "no rule"}${
-                      inactive ? " (inactive)" : ""
-                    }`}
+                    {`${item.faculty_name} → ${describePattern(item)}${
+                      item.usual_days_count ? ` (${item.usual_days_count} of ${item.usual_days_total} classes)` : ""
+                    }: ${item.has_rule ? "has rule" : "no rule"}${
+                      differingCandidate(item) ? ` (rule candidate ${differingCandidate(item)})` : ""
+                    }${inactive ? " (inactive)" : ""}`}
                   </title>
                   <path
                     d={`M${LEFT + 6},${ty} C${(LEFT + RIGHT) / 2},${ty} ${(LEFT + RIGHT) / 2},${py} ${RIGHT - 6},${py}`}
@@ -1150,7 +1159,19 @@ function FacultyCoveragePanel({ ruleSetId, thresholds }: { ruleSetId: string; th
                           </span>
                         ) : null}
                       </th>
-                      <td className="px-4 py-2.5">{describePattern(item)}</td>
+                      <td className="px-4 py-2.5">
+                        {describePattern(item)}
+                        {item.usual_days_count ? (
+                          <span className="ml-1 text-xs text-on-surface-variant">
+                            ({item.usual_days_count} of {item.usual_days_total})
+                          </span>
+                        ) : null}
+                        {differingCandidate(item) && (
+                          <span className="block text-xs text-on-surface-variant">
+                            Rule candidate: {differingCandidate(item)}
+                          </span>
+                        )}
+                      </td>
                       <td className="text-right px-4 py-2.5 font-mono-data tabular-nums">{item.offering_count ?? "—"}</td>
                       {COVERAGE_METRICS.map((metric) => (
                         <CoverageMetricCell key={metric.key} value={item[metric.key]} meets={item[metric.meets]} />
