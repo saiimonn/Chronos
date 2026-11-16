@@ -260,9 +260,15 @@ export function BlockGenerationProvider({ children }: { children: ReactNode }) {
     updateRun(blockId, { phase: "submitting", error: undefined, refreshError: undefined, preview: undefined, metrics: undefined, previewFailed: false, editedClassIds: undefined, jobId: undefined });
     // Proposals still waiting for review are passed along, so this Block is
     // generated around them instead of on top of them.
-    const contextJobIds = Object.entries(runsRef.current)
+    const contextRuns = Object.entries(runsRef.current)
       .filter(([id, run]) => id !== blockId && run.jobId && (run.phase === "review" || run.phase === "approving"))
-      .map(([, run]) => run.jobId as string);
+      .map(([, run]) => run);
+    const contextJobIds = contextRuns.map((run) => run.jobId as string);
+    // A proposal changed by hand is held as it now stands, not as generated:
+    // otherwise the slot a class was moved into looks free to this Block.
+    const contextEdits = contextRuns
+      .filter((run) => run.editedClassIds?.length && run.preview)
+      .map((run) => ({ job_id: run.jobId as string, assignments: toPayload(run.preview as BlockReplacementPreviewResponse) }));
     let jobId: string;
     try {
       const accepted = await api.submitGAJob({
@@ -270,6 +276,7 @@ export function BlockGenerationProvider({ children }: { children: ReactNode }) {
         block_id: blockId,
         base_schedule_id: scheduleId,
         ...(contextJobIds.length > 0 ? { context_job_ids: contextJobIds } : {}),
+        ...(contextEdits.length > 0 ? { context_edits: contextEdits } : {}),
       });
       jobId = accepted.job_id;
       if (session !== sessionRef.current) return "stop";
