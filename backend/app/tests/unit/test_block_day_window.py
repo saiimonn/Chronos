@@ -8,6 +8,7 @@ from app.domain import (
     Assignment,
     CandidateSchedule,
     ConflictCode,
+    LockedAssignment,
     TimeSlotDTO,
     build_offering_block_ids,
 )
@@ -163,3 +164,38 @@ def test_a_break_or_an_unflagged_check_reports_no_run():
     # 07:30-12:00 then 13:30-15:00: 4.5h in a row at most.
     assert _run_conflicts([0, 1, 2, 4]) == []
     assert _run_conflicts([0, 1, 2, 3], flag=False) == []
+
+
+def test_a_block_run_moves_its_window_past_other_blocks_full_mornings():
+    # Other Blocks hold every teacher and room 07:30-16:30 on MW and TTh, the
+    # case where every per-Block run took 07:30-15:30 and left classes out.
+    full = _wide_grid_problem(blocks=2)
+    problem = replace(
+        full,
+        classes=tuple(c for c in full.classes if c.block_id != _OTHER_BLOCK_ID),
+        offering_block_ids=build_offering_block_ids(
+            tuple(c for c in full.classes if c.block_id != _OTHER_BLOCK_ID)
+        ),
+    )
+    locks = tuple(
+        LockedAssignment(
+            class_id=UUID(int=0xE000 + 64 * f + 8 * s + d),
+            faculty_id=member.faculty_id,
+            time_slot_id=problem.time_slots[s].time_slot_id,
+            room_code=room.room_code,
+            meeting_days=days,
+            block_id=_OTHER_BLOCK_ID,
+            offering_id=UUID(int=0xE800 + 64 * f + 8 * s + d),
+            units=0,  # Only time and room matter here, not teaching load.
+        )
+        for f, (member, room) in enumerate(zip(problem.faculty, problem.rooms, strict=False))
+        for s in range(6)
+        for d, days in enumerate(("MW", "TTh"))
+    )
+    result = GAEngine(
+        problem,
+        GAConfig(population_size=16, max_generations=10, tournament_size=2, random_seed=3),
+        locked_assignments=locks,
+    ).run()
+    assert result.metrics.assignment_completeness == 1.0
+    assert result.metrics.hard_conflict_count == 0

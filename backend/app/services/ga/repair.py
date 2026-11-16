@@ -67,7 +67,11 @@ class RepairContext:
         return cls(
             problem=problem,
             config=resolved_config,
-            sampler=GeneSampler(problem, resolved_config),
+            sampler=GeneSampler(
+                problem,
+                resolved_config,
+                locked_assignments=tuple(locked_assignments or ()),
+            ),
             locked_assignments=tuple(locked_assignments or ()),
             offering_block_ids=offering_block_ids,
             balance_days=balance_days,

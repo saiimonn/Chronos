@@ -82,6 +82,7 @@ class GeneSampler:
         problem: SchedulingProblem,
         config: GAConfig,
         availability_codec: AvailabilityMaskCodec | None = None,
+        locked_assignments: Sequence[LockedAssignment] = (),
     ):
         codec = availability_codec or AvailabilityMaskCodec()
         self._config = config
@@ -215,7 +216,7 @@ class GeneSampler:
             if partner_lab is not None:
                 self._pin_time(offering_id, partner_lab)
 
-        self._fit_block_day_windows(problem)
+        self._fit_block_day_windows(problem, locked_assignments)
 
         for offering_id, pool in self._faculty_pools.items():
             fans = preferring.get(subject_of_offering[offering_id], set())
@@ -230,12 +231,19 @@ class GeneSampler:
             if class_id in offering_of and partner_id in offering_of
         }
 
-    def _fit_block_day_windows(self, problem: SchedulingProblem) -> None:
+    def _fit_block_day_windows(
+        self,
+        problem: SchedulingProblem,
+        locked_assignments: Sequence[LockedAssignment] = (),
+    ) -> None:
         """Narrow each Offering's start slots to its Blocks' 8-hour window,
         minus one short break that keeps every back-to-back run under 6 hours.
 
         Blocks that share an Offering share a window. Each group takes the
-        window that keeps the most of its Offerings placeable, then the span
+        window that keeps the most of its Offerings placeable, then the one
+        where its Offerings keep the most open times around other Blocks'
+        locked classes (a per-Block run would otherwise take the same early
+        window as every Block before it and find it full), then the span
         fewest groups use (spreading Blocks eases room and teacher clashes),
         then the break that leaves room for the most classes (a mid-morning
         break can cost a 2.5h lab), then the earliest. A window must
@@ -359,6 +367,42 @@ class GeneSampler:
                 if _fits(window, *single[slot_id])
             )
 
+        # Other Blocks' locked meetings, by teacher and by room.
+        busy: dict[object, list[tuple[frozenset, int, int]]] = {}
+        for lock in locked_assignments:
+            if lock.time_slot_id not in self._slots_by_id or not lock.meeting_days:
+                continue
+            start, end = meeting(lock.time_slot_id, lock.meeting_days)
+            entry = (pattern_weekdays(lock.meeting_days), start, end)
+            busy.setdefault(lock.faculty_id, []).append(entry)
+            busy.setdefault(("room", lock.room_code), []).append(entry)
+
+        def idle(key: object, days: frozenset, start: int, end: int) -> bool:
+            return not any(
+                days & other_days and start < other_end and other_start < end
+                for other_days, other_start, other_end in busy.get(key, ())
+            )
+
+        def open_times(offering_id: UUID, window: DayWindow) -> int:
+            """Start times and patterns with a free teacher and a free room."""
+            options = set()
+            patterns = self._first_choice_patterns[offering_id]
+            rooms = self._room_pools[offering_id]
+            for faculty_id in self._faculty_pools[offering_id]:
+                for slot_id in inside(offering_id, faculty_id, window):
+                    for pattern in patterns:
+                        if (slot_id, pattern) in options:
+                            continue
+                        start, end = meeting(slot_id, pattern)
+                        if not _fits(window, start, end):
+                            continue
+                        days = pattern_weekdays(pattern)
+                        if idle(faculty_id, days, start, end) and any(
+                            idle(("room", room), days, start, end) for room in rooms
+                        ):
+                            options.add((slot_id, pattern))
+            return len(options)
+
         used: Counter[DayWindow] = Counter()
         used_span: Counter[tuple[int, int]] = Counter()
         for group, offerings in free.items():
@@ -374,10 +418,22 @@ class GeneSampler:
                     for o in offerings
                 )
 
+            # ponytail: enough open times is a heuristic (twice the group's
+            # class count, so its own classes can avoid one another); it does
+            # not prove the Block fits. Raise the cap if runs still leave
+            # classes unplaced while later windows stand empty.
+            enough = 2 * len(offerings)
+
+            def roomy(window: DayWindow) -> int:
+                if not busy:
+                    return 0
+                return sum(min(open_times(o, window), enough) for o in offerings)
+
             window = max(
                 options,
                 key=lambda w: (
                     placeable(w),
+                    roomy(w),
                     -used_span[w[:2]],
                     fit.get(w, (1 << 30, 0, 0)),
                     -used[w],
