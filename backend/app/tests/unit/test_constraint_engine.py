@@ -544,6 +544,27 @@ def test_lecture_subject_requires_a_lecture_room():
     assert ConstraintEngine().evaluate(problem, (_assignment(SECTION_1),)).is_valid
 
 
+def test_room_outside_allowed_rooms_is_a_hard_conflict():
+    problem = _problem()
+    room_code = problem.rooms[0].room_code
+
+    def restrict(rooms):
+        return replace(
+            problem,
+            subjects=(replace(problem.subjects[0], allowed_rooms=frozenset(rooms)),)
+            + problem.subjects[1:],
+        )
+
+    report = ConstraintEngine().evaluate(restrict({"OTHER"}), (_assignment(SECTION_1),))
+
+    assert tuple(conflict.code for conflict in report.conflicts) == (
+        ConflictCode.ROOM_NOT_ALLOWED,
+    )
+    assert ConstraintEngine().evaluate(
+        restrict({room_code}), (_assignment(SECTION_1),)
+    ).is_valid
+
+
 def test_subject_duration_must_match_the_assigned_time_slot():
     problem = _problem()
     problem = replace(
