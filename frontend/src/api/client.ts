@@ -1086,6 +1086,10 @@ export interface RuleSetFacultyCoverageItem {
   meets_confidence: boolean;
   meets_lift: boolean;
   meets_term_recurrence: boolean;
+  // Teacher-day only: the GA day pattern taught most, its class count and the total.
+  usual_days?: string | null;
+  usual_days_count?: number | null;
+  usual_days_total?: number | null;
 }
 
 export interface RuleSetFacultyCoverage {

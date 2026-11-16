@@ -98,6 +98,11 @@ class RuleSetFacultyCoverageItem(BaseModel):
     meets_confidence: bool
     meets_lift: bool
     meets_term_recurrence: bool
+    # Teacher-day only: the GA day pattern (MW, TTh, F) the teacher taught most
+    # in the version's training terms, with its class count and their total.
+    usual_days: str | None = None
+    usual_days_count: int | None = None
+    usual_days_total: int | None = None
 
 
 class RuleSetFacultyCoverage(BaseModel):
