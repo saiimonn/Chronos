@@ -232,6 +232,49 @@ class _ClashScreen:
             for room in room_pool
         )
 
+    def spare_teacher(
+        self,
+        sampler: GeneSampler,
+        offering_id: UUID,
+        taken_faculty: UUID,
+        meeting_days: str,
+        time_slot_id: UUID,
+    ) -> bool:
+        """Another teacher of the pool could take the partner LAB at this time:
+        available then, not teaching then, and with room for its units."""
+        meeting = self._meeting(time_slot_id, meeting_days)
+        return any(
+            faculty_id != taken_faculty
+            and not self.overloaded(faculty_id)
+            and time_slot_id in sampler.time_slot_pool(offering_id, faculty_id, meeting_days)
+            and (
+                meeting is None
+                or not self._clashes(meeting, self._by_faculty.get(faculty_id, ()))
+            )
+            for faculty_id in sampler.faculty_pool(offering_id)
+        )
+
+    def spare_for_partner(
+        self,
+        sampler: GeneSampler,
+        offering_id: UUID,
+        alternative: Assignment,
+    ) -> bool:
+        """The partner LAB, which must meet at this exact time, still has both
+        a free room and a free teacher."""
+        return self.spare_room(
+            sampler.room_pool(offering_id),
+            alternative.room_code or "",
+            alternative.meeting_days or "",
+            alternative.time_slot_id,
+        ) and self.spare_teacher(
+            sampler,
+            offering_id,
+            alternative.faculty_id,
+            alternative.meeting_days or "",
+            alternative.time_slot_id,
+        )
+
     def room_open(self, room_code: str, meeting_days: str, time_slot_id: UUID) -> bool:
         meeting = self._meeting(time_slot_id, meeting_days)
         return meeting is None or not self._clashes(
@@ -456,10 +499,11 @@ class DeterministicRepairOperator:
         context: RepairContext,
         codec: ChromosomeCodec,
     ) -> set[UUID]:
-        """Classes of paired LABs whose partner still needs a room at their time.
+        """Classes of paired LABs whose partner would find no room or no
+        teacher free at their time.
 
         Only LABs whose partner is not placed yet count: a placed partner
-        already holds its own room, and the room clash check covers it.
+        already holds its own room and teacher, and the clash checks cover it.
         """
         short: set[UUID] = set()
         seen: set[UUID] = set()
@@ -474,12 +518,7 @@ class DeterministicRepairOperator:
             if assignment.meeting_days is None or assignment.room_code is None:
                 continue
             screen = _ClashScreen(offering_id, class_ids, working, context)
-            if not screen.spare_room(
-                context.sampler.room_pool(offering_id),
-                assignment.room_code,
-                assignment.meeting_days,
-                assignment.time_slot_id,
-            ):
+            if not screen.spare_for_partner(context.sampler, offering_id, assignment):
                 short.update(class_ids)
         return short
 
@@ -599,8 +638,8 @@ class DeterministicRepairOperator:
             None,
         )
         # A paired LAB whose partner is not placed yet first tries only times
-        # where a second laboratory is free for the partner, then, rather than
-        # stay unplaced, the remaining times.
+        # where a second laboratory and a second teacher are free for the
+        # partner, then, rather than stay unplaced, the remaining times.
         spare_modes: tuple[bool | None, ...] = (
             (True, False)
             if partner is None
@@ -703,9 +742,9 @@ def _screened_pass(
     ``screen``: an overloaded faculty, or a time the faculty or cohort is
     already busy, drops the whole branch.
 
-    ``require_spare`` True keeps only placements that leave a second room of
-    the pool free at the same time (for a paired LAB's partner), False only
-    those that do not, None every placement."""
+    ``require_spare`` True keeps only placements that leave a second room
+    and a second teacher of the pools free at the same time (for a paired
+    LAB's partner), False only those that do not, None every placement."""
     room_pool = sampler.room_pool(offering_id)
     for faculty_id in sampler.repair_faculty_order(offering_id):
         if screen.overloaded(faculty_id):
@@ -729,17 +768,18 @@ def _screened_pass(
             for meeting_days, time_slot_id in open_times:
                 if not screen.room_open(room_code, meeting_days, time_slot_id):
                     continue
-                if require_spare is not None and require_spare != screen.spare_room(
-                    room_pool, room_code, meeting_days, time_slot_id
-                ):
-                    continue
-                yield Assignment(
+                alternative = Assignment(
                     class_id=class_ids[0],
                     faculty_id=faculty_id,
                     time_slot_id=time_slot_id,
                     room_code=room_code,
                     meeting_days=meeting_days,
                 )
+                if require_spare is not None and require_spare != screen.spare_for_partner(
+                    sampler, offering_id, alternative
+                ):
+                    continue
+                yield alternative
 
 
 def _needs_spare_room(
