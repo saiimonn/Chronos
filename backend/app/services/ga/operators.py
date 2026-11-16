@@ -6,6 +6,7 @@ run is reproducible from its seed alone. DEAP stock operators are not used
 because they draw from the ``random`` module globals.
 """
 
+from collections import Counter
 from collections.abc import Sequence
 from datetime import time
 from random import Random
@@ -40,24 +41,16 @@ _GENE_SWAP_PROBABILITY = 0.5
 # other legal teacher reachable, so a preference never blocks an assignment
 # and never crowds one teacher past their load on every draw.
 PREFERRED_FACULTY_PROBABILITY = 0.75
-# Chance that a class's start slot is drawn from those that keep each of its
-# Blocks' days (first class start to last class end) within
-# BLOCK_DAY_SPAN_MINUTES, i.e. a 7-8 hour day. The window follows the Block's
-# own classes, so 07:30-15:30, 09:00-17:00 and 11:30-19:30 all fit. This is a
-# sampling bias only: fitness, hard constraints and repair do not see it, and
-# the remainder keeps every legal slot reachable.
-COMPACT_BLOCK_DAY_PROBABILITY = 0.75
+# Longest a Block's day may run, first class start to last class end. Every
+# Block gets one fixed window of this length and its Offerings only draw start
+# slots inside it, so sampling, mutation, crossover and repair can never build
+# a longer day. This narrows the search space like an availability mask does;
+# fitness F(C) = <A, -H, P> and the hard constraints are unchanged.
 BLOCK_DAY_SPAN_MINUTES = 8 * 60
 
 
 def _minutes(value: time) -> int:
     return value.hour * 60 + value.minute
-
-
-def _compact_day(meetings: Sequence[tuple[int, int]]) -> bool:
-    """True when one Block's meetings on one day span at most 8 hours."""
-    span = max(end for _, end in meetings) - min(start for start, _ in meetings)
-    return span <= BLOCK_DAY_SPAN_MINUTES
 
 
 class GeneSampler:
@@ -83,9 +76,6 @@ class GeneSampler:
 
         subjects = {subject.subject_code: subject for subject in problem.subjects}
         classes_by_id = {section.class_id: section for section in problem.classes}
-        self._block_of_class = {
-            section.class_id: section.block_id for section in problem.classes
-        }
 
         ordered_slots = sorted(problem.time_slots, key=lambda slot: slot.ordinal)
         available_by_faculty: dict[UUID, WeeklyAvailability] = {}
@@ -126,6 +116,11 @@ class GeneSampler:
         # Friday-only meetings need the slot after each start free as well.
         self._time_slots = tuple(problem.time_slots)
         self._slots_by_id = {slot.time_slot_id: slot for slot in problem.time_slots}
+        # Minutes since midnight by which a narrowed Offering's meeting ends.
+        self._day_window_end: dict[UUID, int] = {}
+        self._block_of_class = {
+            section.class_id: section.block_id for section in problem.classes
+        }
         self._available_by_faculty = available_by_faculty
         self._double_pools: dict[tuple[UUID, UUID, str], tuple[UUID, ...]] = {}
         # Terms 1-2 draw the configured MW/TTh/F patterns; term 3 is MTWTh.
@@ -206,6 +201,8 @@ class GeneSampler:
             if partner_lab is not None:
                 self._pin_time(offering_id, partner_lab)
 
+        self._fit_block_day_windows(problem)
+
         for offering_id, pool in self._faculty_pools.items():
             fans = preferring.get(subject_of_offering[offering_id], set())
             self._preferred_faculty_pools[offering_id] = tuple(
@@ -218,6 +215,113 @@ class GeneSampler:
             for class_id, partner_id in problem.lab_partners.items()
             if class_id in offering_of and partner_id in offering_of
         }
+
+    def _fit_block_day_windows(self, problem: SchedulingProblem) -> None:
+        """Narrow each Offering's start slots to its Blocks' 8-hour window.
+
+        Blocks that share an Offering share a window. Each group takes the
+        window that keeps the most of its Offerings placeable, then the one
+        fewest groups use (spreading Blocks eases room and teacher clashes),
+        then the earliest. A window must hold the group's pinned placements,
+        and pinned Offerings keep their single legal slot.
+        """
+        def meeting(slot_id: UUID, pattern: str | None) -> tuple[int, int]:
+            slot = self._slots_by_id[slot_id]
+            return _minutes(slot.start_time), _minutes(meeting_end(slot, pattern))
+
+        starts = sorted({_minutes(slot.start_time) for slot in self._time_slots})
+        if not starts:
+            return
+        day_end = max(_minutes(slot.end_time) for slot in self._time_slots)
+        windows = [
+            (start, start + BLOCK_DAY_SPAN_MINUTES)
+            for start in starts
+            if start + BLOCK_DAY_SPAN_MINUTES <= day_end
+        ] or [(starts[0], starts[0] + BLOCK_DAY_SPAN_MINUTES)]
+
+        parent: dict[UUID, UUID] = {}
+
+        def root(block: UUID) -> UUID:
+            while parent.setdefault(block, block) != block:
+                block = parent[block]
+            return block
+
+        blocks_of = {
+            offering_id: [
+                self._block_of_class[class_id]
+                for class_id in self._codec.class_ids_for(offering_id)
+            ]
+            for offering_id in self._offering_ids
+        }
+        for blocks in blocks_of.values():
+            for block in blocks[1:]:
+                parent[root(block)] = root(blocks[0])
+
+        fixed = {**problem.paired_lab_placements, **problem.shared_placements}
+        free: dict[UUID, list[UUID]] = {}
+        pinned: dict[UUID, list[tuple[int, int]]] = {}
+        for offering_id in self._offering_ids:
+            group = root(blocks_of[offering_id][0])
+            placement = fixed.get(offering_id)
+            if placement is None:
+                free.setdefault(group, []).append(offering_id)
+            elif placement.time_slot_id in self._slots_by_id:
+                pinned.setdefault(group, []).append(
+                    meeting(placement.time_slot_id, placement.meeting_days)
+                )
+
+        pool_keys: dict[UUID, list[UUID]] = {}
+        for offering_id, faculty_id in self._time_slot_pools:
+            pool_keys.setdefault(offering_id, []).append(faculty_id)
+
+        def inside(offering_id: UUID, faculty_id: UUID, window: tuple[int, int]):
+            # One session; a two-session pattern's later end is checked per
+            # pattern in time_slot_pool.
+            low, high = window
+            return tuple(
+                slot_id
+                for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
+                if low <= meeting(slot_id, None)[0]
+                and meeting(slot_id, None)[1] <= high
+            )
+
+        used: Counter[tuple[int, int]] = Counter()
+        for group, offerings in free.items():
+            options = [
+                window
+                for window in windows
+                if all(
+                    window[0] <= start and end <= window[1]
+                    for start, end in pinned.get(group, ())
+                )
+            ] or windows
+
+            def placeable(window: tuple[int, int]) -> int:
+                return sum(
+                    any(inside(o, f, window) for f in self._faculty_pools[o])
+                    for o in offerings
+                )
+
+            window = max(options, key=lambda w: (placeable(w), -used[w], -w[0]))
+            used[window] += 1
+            for offering_id in offerings:
+                narrowed = {
+                    faculty_id: inside(offering_id, faculty_id, window)
+                    for faculty_id in pool_keys.get(offering_id, ())
+                }
+                faculty_pool = tuple(
+                    f for f in self._faculty_pools[offering_id] if narrowed[f]
+                )
+                # ponytail: an Offering no teacher can hold inside the window
+                # keeps its full pool (and can exceed 8h) rather than staying
+                # unresolved; widen the window choice if this shows up in runs.
+                if not faculty_pool:
+                    continue
+                self._time_slot_pools.update(
+                    ((offering_id, f), slots) for f, slots in narrowed.items()
+                )
+                self._faculty_pools[offering_id] = faculty_pool
+                self._day_window_end[offering_id] = window[1]
 
     def _pin(self, offering_id: UUID, pinned: LockedAssignment) -> None:
         slot_legal = pinned.time_slot_id in self._time_slot_pools.get(
@@ -326,8 +430,11 @@ class GeneSampler:
                     chain = continuation_slots(
                         slots[slot_id], meeting_days, self._time_slots
                     )
-                    if chain is not None and all(
-                        s.time_slot_id in available for s in chain
+                    if (
+                        chain is not None
+                        and all(s.time_slot_id in available for s in chain)
+                        and _minutes(meeting_end(slots[slot_id], meeting_days))
+                        <= self._day_window_end.get(offering_id, 24 * 60)
                     ):
                         kept.append(slot_id)
             self._double_pools[key] = tuple(kept)
@@ -378,20 +485,12 @@ class GeneSampler:
     def offering_for(self, class_id: UUID) -> UUID:
         return self._codec.offering_for(class_id)
 
-    def sample_gene(
-        self,
-        offering_id: UUID,
-        rng: Random,
-        context: Sequence[ScheduleGene] = (),
-    ) -> ScheduleGene:
+    def sample_gene(self, offering_id: UUID, rng: Random) -> ScheduleGene:
         """Draw one complete assignment, or leave the offering unresolved.
 
         An offering with an empty pool has no legal single placement at all, so
         it stays unresolved here and through every later mutation. Making it
         placeable is a data problem, not something an operator may invent.
-
-        ``context`` holds the individual's other genes; the start slot then
-        favors one that keeps each Block's day compact (_draw_slot).
         """
 
         class_ids = self._codec.class_ids_for(offering_id)
@@ -418,13 +517,7 @@ class GeneSampler:
                 offering_id=offering_id,
                 class_ids=class_ids,
                 faculty_id=faculty_id,
-                time_slot_id=self._draw_slot(
-                    offering_id,
-                    self.time_slot_pool(offering_id, faculty_id),
-                    first,
-                    context,
-                    rng,
-                ),
+                time_slot_id=rng.choice(self.time_slot_pool(offering_id, faculty_id)),
                 room_code=rng.choice(room_pool),
                 meeting_days=rng.choice(first),
             )
@@ -449,95 +542,26 @@ class GeneSampler:
             offering_id=offering_id,
             class_ids=class_ids,
             faculty_id=faculty_id,
-            time_slot_id=self._draw_slot(
-                offering_id,
-                self.time_slot_pool(offering_id, faculty_id, meeting_days),
-                (meeting_days,),
-                context,
-                rng,
+            time_slot_id=rng.choice(
+                self.time_slot_pool(offering_id, faculty_id, meeting_days)
             ),
             room_code=rng.choice(room_pool),
             meeting_days=meeting_days,
         )
-
-    def _draw_slot(
-        self,
-        offering_id: UUID,
-        pool: Sequence[UUID],
-        patterns: Sequence[str],
-        context: Sequence[ScheduleGene],
-        rng: Random,
-    ) -> UUID:
-        """Draw a start slot, favoring one that keeps every Block's day compact.
-
-        A slot counts as compact when it does so on every pattern in
-        ``patterns`` (the draw picks the days after the slot when there are
-        several). The extra random draw happens only when the bias can matter
-        (some but not all of ``pool`` fit), so a run whose Block days are
-        already compact consumes the RNG exactly as before.
-        """
-        blocks = {
-            self._block_of_class[class_id]
-            for class_id in self._codec.class_ids_for(offering_id)
-        }
-        busy: dict[tuple[UUID, object], list[tuple[int, int]]] = {}
-        for gene in context:
-            if not gene.is_resolved or gene.offering_id == offering_id:
-                continue
-            slot = self._slots_by_id[gene.time_slot_id]
-            window = (
-                _minutes(slot.start_time),
-                _minutes(meeting_end(slot, gene.meeting_days)),
-            )
-            days = pattern_weekdays(gene.meeting_days)
-            for class_id in gene.class_ids:
-                block = self._block_of_class[class_id]
-                if block in blocks:
-                    for day in days:
-                        busy.setdefault((block, day), []).append(window)
-        if not busy:
-            return rng.choice(pool)
-
-        def fits(slot_id: UUID) -> bool:
-            slot = self._slots_by_id[slot_id]
-            for pattern in patterns:
-                window = (
-                    _minutes(slot.start_time),
-                    _minutes(meeting_end(slot, pattern)),
-                )
-                for day in pattern_weekdays(pattern):
-                    for block in blocks:
-                        meetings = busy.get((block, day))
-                        if meetings and not _compact_day([*meetings, window]):
-                            return False
-            return True
-
-        compact = tuple(slot_id for slot_id in pool if fits(slot_id))
-        if (
-            compact
-            and len(compact) < len(pool)
-            and rng.random() < COMPACT_BLOCK_DAY_PROBABILITY
-        ):
-            return rng.choice(compact)
-        return rng.choice(pool)
 
     def sample_individual(self, rng: Random) -> tuple[ScheduleGene, ...]:
         genes: dict[UUID, ScheduleGene] = {}
         for offering_id in self._offering_ids:
             partner = genes.get(self._lab_partner_offerings.get(offering_id))
             genes[offering_id] = (
-                self._sample_beside(offering_id, partner, rng, tuple(genes.values()))
+                self._sample_beside(offering_id, partner, rng)
                 if partner is not None and partner.is_resolved
-                else self.sample_gene(offering_id, rng, tuple(genes.values()))
+                else self.sample_gene(offering_id, rng)
             )
         return tuple(genes.values())
 
     def _sample_beside(
-        self,
-        offering_id: UUID,
-        partner: ScheduleGene,
-        rng: Random,
-        context: Sequence[ScheduleGene] = (),
+        self, offering_id: UUID, partner: ScheduleGene, rng: Random
     ) -> ScheduleGene:
         """Draw a paired LAB at its partner's time, in another room and with
         another teacher where the pools allow; otherwise draw freely."""
@@ -554,7 +578,7 @@ class GeneSampler:
             or not room_pool
             or partner.meeting_days not in self.meeting_day_patterns(offering_id)
         ):
-            return self.sample_gene(offering_id, rng, context)
+            return self.sample_gene(offering_id, rng)
         other_faculty = tuple(f for f in faculty_pool if f != partner.faculty_id)
         other_rooms = tuple(r for r in room_pool if r != partner.room_code)
         return ScheduleGene(
@@ -618,14 +642,10 @@ def mutate(
     config: GAConfig,
     rng: Random,
 ) -> tuple[ScheduleGene, ...]:
-    """Resample whole genes at gene_mutation_rate, returning a new sequence.
-
-    Each resampled gene sees the rest of the parent's genes, so its start slot
-    favors keeping its Blocks' days compact.
-    """
+    """Resample whole genes at gene_mutation_rate, returning a new sequence."""
 
     return tuple(
-        sampler.sample_gene(gene.offering_id, rng, genes)
+        sampler.sample_gene(gene.offering_id, rng)
         if rng.random() < config.gene_mutation_rate
         else gene
         for gene in genes
