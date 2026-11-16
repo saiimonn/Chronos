@@ -8,6 +8,7 @@ from uuid import UUID
 
 from app.domain import Assignment, LockedAssignment, SchedulingProblem
 from app.services.ga.chromosome import ChromosomeCodec, ScheduleGene
+from app.services.ga.day_balance import day_balance_score
 from app.services.validation import ConstraintEngine
 
 
@@ -62,10 +63,15 @@ class ZeroHistoricalAttainmentScorer:
 
 
 class LexicographicFitnessEvaluator:
-    """Evaluate offering completeness, hard conflicts, then historical attainment.
+    """Evaluate offering completeness, hard conflicts, then the soft score.
 
     The first component counts resolved offering genes (not block-level
     assignments), so the GA terminates when every offering has a placement.
+
+    The soft score is historical attainment alone unless ``day_balance_weight``
+    is set; then it adds that weight times the day-balance score (how evenly
+    each Block's hours spread over Monday-Thursday). Thesis evaluation runs
+    leave the weight at 0, so their third component stays pure attainment.
     """
 
     def __init__(
@@ -75,7 +81,11 @@ class LexicographicFitnessEvaluator:
         constraint_engine: ConstraintEngine | None = None,
         locked_assignments: Sequence[LockedAssignment] | None = None,
         offering_block_ids: Mapping[UUID, Sequence[UUID]] | None = None,
+        day_balance_weight: float = 0.0,
     ):
+        if not isfinite(day_balance_weight) or day_balance_weight < 0:
+            raise ValueError("day_balance_weight must be a finite, non-negative number")
+        self._day_balance_weight = day_balance_weight
         self._problem = problem
         self._codec = ChromosomeCodec(problem)
         self._historical_scorer = (
@@ -102,8 +112,19 @@ class LexicographicFitnessEvaluator:
         resolved_offerings = sum(
             1 for gene in individual if gene.is_resolved
         )
+        soft = historical_scores.historical_pattern_attainment
+        if self._day_balance_weight:
+            soft += self._day_balance_weight * day_balance_score(
+                self._problem, candidate.assignments
+            )
         return (
             resolved_offerings,
             -report.hard_conflict_count,
-            historical_scores.historical_pattern_attainment,
+            soft,
         )
+
+    def historical_attainment(self, individual: Sequence[ScheduleGene]) -> float:
+        """Historical attainment alone, without the day-balance term."""
+        return self._historical_scorer.score(
+            self._problem, self._codec.decode(individual).assignments
+        ).historical_pattern_attainment

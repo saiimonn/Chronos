@@ -14,6 +14,7 @@ from app.models.faculty import Faculty
 from app.models.historical_snapshot import HistoricalRecord, HistoricalSnapshot
 from app.models.rule_set import RuleSet, rule_set_term
 from app.models.rule_set_faculty_metric import RuleSetFacultyMetric
+from app.models.subject import Subject
 from app.services.arm.faculty_metrics import usual_day_patterns
 from app.services.arm.preprocessing import HistoricalInclusionPolicy, PatternStream
 from app.services.arm.service import load_historical_terms_by_ids
@@ -110,12 +111,12 @@ def list_historical_terms(db: Session) -> list[dict]:
 
     policy = HistoricalInclusionPolicy()
 
-    def eligible_streams(academic_year: str) -> list[str]:
+    def eligible_streams(academic_year: str, term_number: int) -> list[str]:
         try:
             return [
                 stream.value
                 for stream in PatternStream
-                if policy.is_eligible(stream, academic_year)
+                if policy.is_term_eligible(stream, academic_year, term_number)
             ]
         except ValueError:
             # A stored year the policy cannot parse is reported as eligible for
@@ -134,7 +135,9 @@ def list_historical_terms(db: Session) -> list[dict]:
             "term_number": snapshot.term_number,
             "captured_at": snapshot.captured_at,
             "record_count": record_count,
-            "eligible_streams": eligible_streams(snapshot.academic_year),
+            "eligible_streams": eligible_streams(
+                snapshot.academic_year, snapshot.term_number
+            ),
         }
         for snapshot, record_count in rows
     ]
@@ -421,6 +424,15 @@ def list_rule_set_faculty_coverage(
                     "meets_term_recurrence": True,
                 }
             )
+
+    # Patterns on a subject no longer in the catalog (old-curriculum codes)
+    # are left out; streams without a subject are unaffected.
+    catalog = set(db.scalars(select(Subject.subject_code)))
+    items = [
+        item
+        for item in items
+        if item["subject_code"] is None or item["subject_code"] in catalog
+    ]
 
     # The lift-ranked candidate names the days a teacher teaches more than the
     # department does, not the days they usually teach; attach the latter.

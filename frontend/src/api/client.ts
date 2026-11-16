@@ -790,6 +790,9 @@ export interface SubmitGAJobRequest {
   base_schedule_id: string;
   // Earlier unreviewed runs of a generate-all batch, held as locked context.
   context_job_ids?: string[];
+  // Context runs edited by hand in review, held as edited instead of as
+  // generated, so the next Block is not placed into a moved class's slot.
+  context_edits?: { job_id: string; assignments: ReplacementAssignmentPayload[] }[];
 }
 
 export interface GAConfig {
