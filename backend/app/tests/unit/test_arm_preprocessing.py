@@ -71,7 +71,6 @@ def test_policy_holds_out_the_latest_complete_academic_year():
         ("2018-2019", 1),
         ("2022-2023", 1),
         ("2022-2023", 2),
-        ("2022-2023", 3),
     )
     assert periods(subject.holdout_terms) == (
         ("2023-2024", 1),
@@ -330,7 +329,8 @@ def test_partition_separates_absent_history_from_an_exhausted_holdout():
 
     subject = prepared[PatternStream.TEACHER_SUBJECT].partition
     assert subject.has_training_terms is True
-    assert subject.eligible_term_count == 4
+    # The 2019-2020 summer predates the current curriculum and is left out.
+    assert subject.eligible_term_count == 3
     assert subject.holdout_reserved_all_eligible_terms is False
 
     day = prepared[PatternStream.TEACHER_DAY].partition
@@ -510,3 +510,13 @@ def test_time_normalization_does_not_reach_the_other_streams():
         "subject=LEC 07:30-09:00",
         "room=LEC 07:30-09:00",
     )
+
+
+def test_summer_terms_before_the_current_curriculum_are_not_eligible():
+    from app.services.arm.preprocessing import HistoricalInclusionPolicy, PatternStream
+
+    policy = HistoricalInclusionPolicy()
+    stream = PatternStream.TEACHER_SUBJECT
+    assert not policy.is_term_eligible(stream, "2022-2023", 3)
+    assert policy.is_term_eligible(stream, "2022-2023", 2)
+    assert policy.is_term_eligible(stream, "2023-2024", 3)

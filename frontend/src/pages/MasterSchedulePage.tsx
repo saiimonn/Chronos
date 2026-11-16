@@ -53,6 +53,8 @@ import { useAuth } from "../hooks/useAuth";
 import { usePeriodicSync } from "../hooks/usePeriodicSync";
 import ClassEditor, { type ClassPlacement, type OccupiedMeeting } from "./master-schedule/ClassEditor";
 import { compareProgramCodes, EMPTY_CATALOG, loadCatalog, type Catalog } from "./master-schedule/catalog";
+import GenerationOrderControls from "./master-schedule/GenerationOrderControls";
+import { loadGenerationOrder, orderBlockIds, saveGenerationOrder, type GenerationOrder } from "./master-schedule/generationOrder";
 import { clearPendingBatch, loadPendingBatch } from "../utils/pendingBlockBatch";
 import { ACTIVE_PHASES, HELD_PHASES, errorMessage, toPayload, useBlockGeneration, type BlockRun, type RunPhase } from "../state/BlockGeneration";
 
@@ -161,6 +163,12 @@ export default function MasterSchedulePage() {
   // Narrow the Blocks list (and what "Select all" ticks) by program and year.
   const [programFilter, setProgramFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("");
+  // Which program and year a batch generates first (remembered per browser).
+  const [generationOrder, setGenerationOrderState] = useState<GenerationOrder>(loadGenerationOrder);
+  const setGenerationOrder = useCallback((next: GenerationOrder) => {
+    setGenerationOrderState(next);
+    saveGenerationOrder(next);
+  }, []);
   const [finalizing, setFinalizing] = useState(false);
   const [finalizationOpen, setFinalizationOpen] = useState(false);
   const [finalizationError, setFinalizationError] = useState("");
@@ -847,13 +855,17 @@ export default function MasterSchedulePage() {
   // (no classes and nothing approved). The filters make the batches: narrow
   // to a program and year, select all, then generate or approve them.
   const selectableIds = visibleRows.filter((row) => !row.empty || row.accepted.length > 0).map((row) => row.block.block_id);
+  // "Select all" skips locked Blocks: there is nothing to generate or approve
+  // on one until it is unlocked. A locked Block can still be ticked by hand.
+  const selectAllIds = selectableIds.filter((id) => !rowsById.get(id)?.locked);
+  const lockedShownCount = selectableIds.length - selectAllIds.length;
   const bulkIds = selectableIds.filter((id) => bulkSelection.has(id));
   const bulkReviewIds = bulkIds.filter((id) => rowsById.get(id)?.run?.phase === "review");
   const bulkApprovableIds = bulkReviewIds.filter((id) => approvableIds.includes(id));
   const bulkNeedsFixes = bulkReviewIds.length - bulkApprovableIds.length;
   const bulkGenerateIds = bulkIds.filter((id) => rowsById.get(id)?.generatable);
   const bulkLockedCount = bulkIds.filter((id) => rowsById.get(id)?.locked).length;
-  const allSelected = selectableIds.length > 0 && bulkIds.length === selectableIds.length;
+  const allSelected = selectAllIds.length > 0 && selectAllIds.every((id) => bulkSelection.has(id));
   const bulkReplacing = bulkApprovableIds.filter((id) => (rowsById.get(id)?.accepted.length ?? 0) > 0).length;
   const anyApproving = reviewRows.some((row) => row.run?.phase === "approving");
   const bulkLocked = Boolean(bulkApproving) || anyApproving || finalized || editing !== null;
@@ -1102,9 +1114,9 @@ export default function MasterSchedulePage() {
     event.stopPropagation();
   }
 
-  /** Generates the ticked Blocks that can be generated, in list order. */
+  /** Generates the ticked Blocks that can be generated, in the chosen generation order. */
   function generateSelected() {
-    const ids = catalog.blocks.map((block) => block.block_id).filter((id) => bulkGenerateIds.includes(id));
+    const ids = orderBlockIds(bulkGenerateIds, catalog.blocks, generationOrder);
     if (ids.length > 0) void generateBlocks(ids);
   }
 
@@ -1125,10 +1137,9 @@ export default function MasterSchedulePage() {
     // Only the shown Blocks change; ticks on Blocks a filter hides are kept.
     setBulkSelection((current) => {
       const next = new Set(current);
-      for (const id of selectableIds) {
-        if (allSelected) next.delete(id);
-        else next.add(id);
-      }
+      // Unticking clears every shown Block, locked ones ticked by hand too.
+      if (allSelected) for (const id of selectableIds) next.delete(id);
+      else for (const id of selectAllIds) next.add(id);
       return next;
     });
   }
@@ -1589,11 +1600,16 @@ export default function MasterSchedulePage() {
                             checked={allSelected}
                             ref={(input) => { if (input) input.indeterminate = bulkIds.length > 0 && !allSelected; }}
                             onChange={toggleAllBulk}
-                            disabled={bulkLocked || selectableIds.length === 0}
+                            disabled={bulkLocked || selectAllIds.length === 0}
                             className="w-4 h-4 accent-primary"
                           />
-                          {filterActive ? "Select all shown" : "Select all"} ({selectableIds.length})
+                          {filterActive ? "Select all shown" : "Select all"} ({selectAllIds.length})
                         </label>
+                        {lockedShownCount > 0 && (
+                          <span className="text-sm text-on-surface-variant -ml-1 mr-auto">
+                            {lockedShownCount} locked {lockedShownCount === 1 ? "Block" : "Blocks"} skipped
+                          </span>
+                        )}
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-on-surface-variant tabular-nums" aria-live="polite">
                             {bulkApproving
@@ -1660,6 +1676,14 @@ export default function MasterSchedulePage() {
                           )}
                         </div>
                       </div>
+                      {(programOptions.length > 1 || yearOptions.length > 1) && (
+                        <GenerationOrderControls
+                          blocks={catalog.blocks}
+                          order={generationOrder}
+                          onChange={setGenerationOrder}
+                          disabled={Boolean(batch)}
+                        />
+                      )}
                       {selectableIds.length > 0 && (
                         <ul aria-label="Select Blocks" className="lg:hidden mt-2 flex flex-wrap gap-2">
                           {visibleRows.filter((row) => selectableIds.includes(row.block.block_id)).map((row) => (

@@ -228,6 +228,53 @@ def test_context_run_candidate_becomes_a_locked_assignment():
     )
 
 
+def test_edited_context_run_is_held_as_edited():
+    # The proposal was moved by hand in review: holding its original
+    # candidate would leave LB 101 on MW looking free to the next Block.
+    job = _context_job()
+    edited = {
+        "class_id": str(CLASS_B1_ID),
+        "faculty_id": str(FACULTY_1_ID),
+        "room_code": "LB 101",
+        "meeting_days": "MW",
+        "time_slot_id": str(TIME_SLOT_2_ID),
+    }
+    context = add_proposal_locks(
+        _session_for(job),
+        _block_a_context(),
+        _make_problem(),
+        [job.job_id],
+        {job.job_id: [edited]},
+    )
+    assert context.locked_assignments == (
+        LockedAssignment(
+            class_id=CLASS_B1_ID,
+            faculty_id=FACULTY_1_ID,
+            time_slot_id=TIME_SLOT_2_ID,
+            room_code="LB 101",
+            meeting_days="MW",
+            block_id=BLOCK_B_ID,
+            offering_id=OFFERING_B1_ID,
+            units=3,
+        ),
+    )
+
+
+def test_context_edits_must_name_listed_runs():
+    from pydantic import ValidationError
+
+    from app.schemas.jobs import SubmitGAJobRequest
+
+    with pytest.raises(ValidationError, match="context_job_ids"):
+        SubmitGAJobRequest(
+            term_id=uuid4(),
+            block_id=uuid4(),
+            base_schedule_id=uuid4(),
+            context_job_ids=[],
+            context_edits=[{"job_id": str(uuid4()), "assignments": []}],
+        )
+
+
 def test_accepted_assignment_wins_over_a_context_run():
     job = _context_job()
     accepted = LockedAssignment(
