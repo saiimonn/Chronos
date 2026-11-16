@@ -87,6 +87,7 @@ _CONFLICT_ORDER = {
     ConflictCode.FACULTY_INELIGIBLE: 12,
     ConflictCode.FACULTY_INACTIVE: 13,
     ConflictCode.FACULTY_CONSECUTIVE_EXCEEDED: 14,
+    ConflictCode.BLOCK_CONSECUTIVE_EXCEEDED: 15,
 }
 
 # The most classes of one kind a faculty member may teach back to back on one

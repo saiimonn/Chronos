@@ -47,10 +47,24 @@ PREFERRED_FACULTY_PROBABILITY = 0.75
 # a longer day. This narrows the search space like an availability mask does;
 # fitness F(C) = <A, -H, P> and the hard constraints are unchanged.
 BLOCK_DAY_SPAN_MINUTES = 8 * 60
+# A Block may not sit through this long of back-to-back classes (exactly 6h
+# counts). Each Block's window keeps one break slot free so the stretches
+# before and after it both stay shorter. The validator flags any run that
+# still reaches it (BLOCK_CONSECUTIVE_EXCEEDED), outside the GA's H(C).
+BLOCK_RUN_LIMIT_MINUTES = 6 * 60
+
+# (window start, window end, break start, break end) in minutes since midnight.
+DayWindow = tuple[int, int, int, int]
 
 
 def _minutes(value: time) -> int:
     return value.hour * 60 + value.minute
+
+
+def _fits(window: DayWindow, start: int, end: int) -> bool:
+    """A meeting from ``start`` to ``end`` lies in the window, off its break."""
+    low, high, rest_start, rest_end = window
+    return low <= start and end <= high and (end <= rest_start or start >= rest_end)
 
 
 class GeneSampler:
@@ -116,8 +130,8 @@ class GeneSampler:
         # Friday-only meetings need the slot after each start free as well.
         self._time_slots = tuple(problem.time_slots)
         self._slots_by_id = {slot.time_slot_id: slot for slot in problem.time_slots}
-        # Minutes since midnight by which a narrowed Offering's meeting ends.
-        self._day_window_end: dict[UUID, int] = {}
+        # Each narrowed Offering's Block day window, break included.
+        self._day_windows: dict[UUID, DayWindow] = {}
         self._block_of_class = {
             section.class_id: section.block_id for section in problem.classes
         }
@@ -217,7 +231,8 @@ class GeneSampler:
         }
 
     def _fit_block_day_windows(self, problem: SchedulingProblem) -> None:
-        """Narrow each Offering's start slots to its Blocks' 8-hour window.
+        """Narrow each Offering's start slots to its Blocks' 8-hour window,
+        minus one break slot that keeps every back-to-back run under 6 hours.
 
         Blocks that share an Offering share a window. Each group takes the
         window that keeps the most of its Offerings placeable, then the one
@@ -233,11 +248,45 @@ class GeneSampler:
         if not starts:
             return
         day_end = max(_minutes(slot.end_time) for slot in self._time_slots)
-        windows = [
+        spans = [
             (start, start + BLOCK_DAY_SPAN_MINUTES)
             for start in starts
             if start + BLOCK_DAY_SPAN_MINUTES <= day_end
         ] or [(starts[0], starts[0] + BLOCK_DAY_SPAN_MINUTES)]
+        sessions = sorted(
+            {meeting(slot.time_slot_id, None) for slot in self._time_slots}
+        )
+
+        def with_break(low: int, high: int) -> DayWindow:
+            inner = [(a, b) for a, b in sessions if low <= a and b <= high]
+            # Slots that touch or overlap chain into one back-to-back stretch;
+            # an 8-hour window holds at most one stretch of 6 hours or more.
+            chains: list[list[tuple[int, int]]] = []
+            for a, b in inner:
+                if chains and a <= max(end for _, end in chains[-1]):
+                    chains[-1].append((a, b))
+                else:
+                    chains.append([(a, b)])
+            for chain in chains:
+                first = chain[0][0]
+                last = max(end for _, end in chain)
+                if last - first < BLOCK_RUN_LIMIT_MINUTES:
+                    continue
+
+                # The shortest slot that leaves both sides under the limit,
+                # the most even split first; with none, the most even split.
+                def key(rest: tuple[int, int]) -> tuple:
+                    longest = max(rest[0] - first, last - rest[1])
+                    return (
+                        longest >= BLOCK_RUN_LIMIT_MINUTES,
+                        rest[1] - rest[0],
+                        longest,
+                    )
+
+                return (low, high, *min(chain, key=key))
+            return (low, high, high, high)
+
+        windows = [with_break(low, high) for low, high in spans]
 
         parent: dict[UUID, UUID] = {}
 
@@ -274,29 +323,24 @@ class GeneSampler:
         for offering_id, faculty_id in self._time_slot_pools:
             pool_keys.setdefault(offering_id, []).append(faculty_id)
 
-        def inside(offering_id: UUID, faculty_id: UUID, window: tuple[int, int]):
+        def inside(offering_id: UUID, faculty_id: UUID, window: DayWindow):
             # One session; a two-session pattern's later end is checked per
             # pattern in time_slot_pool.
-            low, high = window
             return tuple(
                 slot_id
                 for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
-                if low <= meeting(slot_id, None)[0]
-                and meeting(slot_id, None)[1] <= high
+                if _fits(window, *meeting(slot_id, None))
             )
 
-        used: Counter[tuple[int, int]] = Counter()
+        used: Counter[DayWindow] = Counter()
         for group, offerings in free.items():
             options = [
                 window
                 for window in windows
-                if all(
-                    window[0] <= start and end <= window[1]
-                    for start, end in pinned.get(group, ())
-                )
+                if all(_fits(window, *span) for span in pinned.get(group, ()))
             ] or windows
 
-            def placeable(window: tuple[int, int]) -> int:
+            def placeable(window: DayWindow) -> int:
                 return sum(
                     any(inside(o, f, window) for f in self._faculty_pools[o])
                     for o in offerings
@@ -313,7 +357,7 @@ class GeneSampler:
                     f for f in self._faculty_pools[offering_id] if narrowed[f]
                 )
                 # ponytail: an Offering no teacher can hold inside the window
-                # keeps its full pool (and can exceed 8h) rather than staying
+                # keeps its full pool (and can exceed 8h or 6h in a row) rather than staying
                 # unresolved; widen the window choice if this shows up in runs.
                 if not faculty_pool:
                     continue
@@ -321,7 +365,7 @@ class GeneSampler:
                     ((offering_id, f), slots) for f, slots in narrowed.items()
                 )
                 self._faculty_pools[offering_id] = faculty_pool
-                self._day_window_end[offering_id] = window[1]
+                self._day_windows[offering_id] = window
 
     def _pin(self, offering_id: UUID, pinned: LockedAssignment) -> None:
         slot_legal = pinned.time_slot_id in self._time_slot_pools.get(
@@ -433,8 +477,14 @@ class GeneSampler:
                     if (
                         chain is not None
                         and all(s.time_slot_id in available for s in chain)
-                        and _minutes(meeting_end(slots[slot_id], meeting_days))
-                        <= self._day_window_end.get(offering_id, 24 * 60)
+                        and (
+                            offering_id not in self._day_windows
+                            or _fits(
+                                self._day_windows[offering_id],
+                                _minutes(slots[slot_id].start_time),
+                                _minutes(meeting_end(slots[slot_id], meeting_days)),
+                            )
+                        )
                     ):
                         kept.append(slot_id)
             self._double_pools[key] = tuple(kept)

@@ -56,8 +56,9 @@ CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a4")
 OTHER_CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a5")
 @pytest.fixture
 def whole_day_blocks(monkeypatch):
-    """Lift the 8-hour Block day so the 07:30-21:00 grid stays whole."""
+    """Lift the 8-hour Block day and 6-hour run limit so the grid stays whole."""
     monkeypatch.setattr(operators, "BLOCK_DAY_SPAN_MINUTES", 24 * 60)
+    monkeypatch.setattr(operators, "BLOCK_RUN_LIMIT_MINUTES", 24 * 60)
 
 
 SLOT_0730 = UUID("00000000-0000-0000-0000-0000000000b1")
