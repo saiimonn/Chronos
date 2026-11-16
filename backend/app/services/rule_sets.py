@@ -15,7 +15,9 @@ from app.models.historical_snapshot import HistoricalRecord, HistoricalSnapshot
 from app.models.rule_set import RuleSet, rule_set_term
 from app.models.rule_set_faculty_metric import RuleSetFacultyMetric
 from app.models.subject import Subject
+from app.services.arm.faculty_metrics import usual_day_patterns
 from app.services.arm.preprocessing import HistoricalInclusionPolicy, PatternStream
+from app.services.arm.service import load_historical_terms_by_ids
 from app.services.arm.providers import GuidanceRule, HistoricalGuidance
 from app.services.audit import record_event
 from app.services.jobs.codecs import encode_guidance_snapshot
@@ -287,6 +289,44 @@ def list_rule_set_rules(
     }
 
 
+def _usual_teacher_days(
+    db: Session, rule_set: RuleSet
+) -> dict[str, tuple[str, int, int]]:
+    """Each teacher's most frequent GA day pattern in the version's training terms.
+
+    The training terms are the version's source snapshots plus the snapshots of
+    its included terms, limited to the years the teacher-day stream mines.
+    Keyed by source faculty ID as text, like `source_faculty_key`.
+    """
+    snapshot_ids = {snapshot.snapshot_id for snapshot in rule_set.source_snapshots}
+    term_ids = [term.term_id for term in rule_set.included_terms]
+    if term_ids:
+        snapshot_ids |= set(
+            db.scalars(
+                select(HistoricalSnapshot.snapshot_id).where(
+                    HistoricalSnapshot.source_term_id.in_(term_ids)
+                )
+            )
+        )
+    if not snapshot_ids:
+        return {}
+    earliest = next(
+        (
+            threshold.earliest_academic_year
+            for threshold in rule_set.thresholds
+            if threshold.pattern_type == PatternStream.TEACHER_DAY
+        ),
+        HistoricalInclusionPolicy().earliest_academic_year(PatternStream.TEACHER_DAY),
+    )
+    return usual_day_patterns(
+        (str(offering.faculty_id), offering.meeting_days)
+        for term in load_historical_terms_by_ids(db, list(snapshot_ids))
+        if term.academic_year >= earliest
+        for offering in term.offerings
+        if offering.meeting_days is not None
+    )
+
+
 def list_rule_set_faculty_coverage(
     db: Session, rule_set_id: UUID, pattern_type: str
 ) -> dict:
@@ -297,7 +337,8 @@ def list_rule_set_faculty_coverage(
     created. Versions created before that record existed fall back to their
     retained rules: every teacher with a rule, none of the ones without.
     """
-    if db.get(RuleSet, rule_set_id) is None:
+    rule_set = db.get(RuleSet, rule_set_id)
+    if rule_set is None:
         raise APIError(404, "NOT_FOUND", "The requested rule set was not found.")
 
     roster = {
@@ -392,6 +433,22 @@ def list_rule_set_faculty_coverage(
         for item in items
         if item["subject_code"] is None or item["subject_code"] in catalog
     ]
+
+    # The lift-ranked candidate names the days a teacher teaches more than the
+    # department does, not the days they usually teach; attach the latter.
+    usual = (
+        _usual_teacher_days(db, rule_set)
+        if pattern_type == PatternStream.TEACHER_DAY
+        else {}
+    )
+    for item in items:
+        key = item["source_faculty_key"]
+        if key not in usual and item["faculty_id"] is not None:
+            key = str(item["faculty_id"])
+        pattern, count, total = usual.get(key, (None, None, None))
+        item["usual_days"] = pattern
+        item["usual_days_count"] = count
+        item["usual_days_total"] = total
 
     def met(item: dict) -> int:
         return sum(
