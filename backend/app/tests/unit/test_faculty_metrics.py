@@ -5,7 +5,11 @@ from itertools import count
 from uuid import UUID
 
 from app.services.arm import MiningThresholds, PatternStream, RuleMiner
-from app.services.arm.faculty_metrics import best_faculty_patterns
+from app.services.arm.faculty_metrics import (
+    best_faculty_patterns,
+    ga_day_pattern,
+    usual_day_patterns,
+)
 from app.tests.unit.test_arm_mining import offering, term, training_only
 
 FACULTY_A = UUID("00000000-0000-0000-0000-0000000000a1")
@@ -121,3 +125,28 @@ def test_subject_room_metrics_use_teacher_and_subject_as_antecedent():
 
 def test_no_transactions_yield_no_metrics():
     assert best_faculty_patterns(PatternStream.TEACHER_DAY, (), THRESHOLDS, 1) == ()
+
+
+def test_ga_day_pattern_groups_split_sections_under_their_pattern():
+    assert [ga_day_pattern(days) for days in ("M", "W", "MW", "T", "Th", "TTh", "F")] == [
+        "MW", "MW", "MW", "TTh", "TTh", "TTh", "F",
+    ]
+    # Strings that fit no GA pattern are kept as they are.
+    assert [ga_day_pattern(days) for days in ("MTWTh", "MWF", "Sa", "MF")] == [
+        "MTWTh", "MWF", "Sa", "MF",
+    ]
+
+
+def test_usual_day_patterns_ranks_by_the_teachers_own_class_count():
+    # The largest exact string is F (9 of 32), but the MW lines (MW 5, M 2,
+    # W 3) add up to 10, so the teacher usually teaches MW.
+    days = ["F"] * 9 + ["MW"] * 5 + ["M"] * 2 + ["W"] * 3
+    days += ["TTh"] * 4 + ["T"] * 2 + ["Th"] * 2 + ["MTWTh"] * 3 + ["Sa", "Su"]
+    assert usual_day_patterns(("a", d) for d in days) == {"a": ("MW", 10, 32)}
+
+
+def test_usual_day_patterns_breaks_ties_toward_mw_then_tth():
+    assert usual_day_patterns([("a", "F"), ("a", "TTh"), ("b", "Sa"), ("b", "TTh")]) == {
+        "a": ("TTh", 1, 2),
+        "b": ("TTh", 1, 2),
+    }

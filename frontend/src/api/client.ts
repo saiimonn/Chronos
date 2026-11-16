@@ -709,6 +709,7 @@ export const CONFLICT_CODE_LABEL: Record<string, string> = {
   INVALID_MEETING_PATTERN: "Not an allowed day pattern",
   FACULTY_INACTIVE: "Instructor no longer teaching",
   FACULTY_CONSECUTIVE_EXCEEDED: "Too many classes in a row",
+  ROOM_NOT_ALLOWED: "Room not allowed for subject",
   BLOCK_CONSECUTIVE_EXCEEDED: "Block in class 6h or more in a row",
 };
 
@@ -791,6 +792,9 @@ export interface SubmitGAJobRequest {
   base_schedule_id: string;
   // Earlier unreviewed runs of a generate-all batch, held as locked context.
   context_job_ids?: string[];
+  // Context runs edited by hand in review, held as edited instead of as
+  // generated, so the next Block is not placed into a moved class's slot.
+  context_edits?: { job_id: string; assignments: ReplacementAssignmentPayload[] }[];
 }
 
 export interface GAConfig {
@@ -1087,6 +1091,10 @@ export interface RuleSetFacultyCoverageItem {
   meets_confidence: boolean;
   meets_lift: boolean;
   meets_term_recurrence: boolean;
+  // Teacher-day only: the GA day pattern taught most, its class count and the total.
+  usual_days?: string | null;
+  usual_days_count?: number | null;
+  usual_days_total?: number | null;
 }
 
 export interface RuleSetFacultyCoverage {

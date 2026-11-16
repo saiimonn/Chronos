@@ -87,7 +87,8 @@ _CONFLICT_ORDER = {
     ConflictCode.FACULTY_INELIGIBLE: 12,
     ConflictCode.FACULTY_INACTIVE: 13,
     ConflictCode.FACULTY_CONSECUTIVE_EXCEEDED: 14,
-    ConflictCode.BLOCK_CONSECUTIVE_EXCEEDED: 15,
+    ConflictCode.ROOM_NOT_ALLOWED: 15,
+    ConflictCode.BLOCK_CONSECUTIVE_EXCEEDED: 16,
 }
 
 # The most classes of one kind a faculty member may teach back to back on one
@@ -210,6 +211,23 @@ class ConstraintEngine:
                         f"{_label(item)} is {kind} and requires a "
                         f"{required_room_type.value} room, but "
                         f"{item.room.room_code} is {item.room.room_type.value}.",
+                    )
+                )
+
+            allowed_rooms = item.subject.allowed_rooms
+            if (
+                item.room is not None
+                and allowed_rooms
+                and item.room.room_code not in allowed_rooms
+            ):
+                conflicts.append(
+                    self._single_conflict(
+                        ConflictCode.ROOM_NOT_ALLOWED,
+                        (item.subject.subject_code, item.room.room_code),
+                        item,
+                        f"{_label(item)} may only use "
+                        f"{', '.join(sorted(allowed_rooms))}, but is in "
+                        f"{item.room.room_code}.",
                     )
                 )
 

@@ -14,7 +14,8 @@ compared after quantizing, as `RuleMiner` compares it. A candidate that meets
 all four thresholds is therefore exactly a rule `RuleMiner` retains.
 """
 
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -175,5 +176,49 @@ def best_faculty_patterns(
             best[faculty] = (rank, pattern, metric)
 
     return tuple(best[faculty][2] for faculty in sorted(best))
+
+
+_DAY_TOKEN = re.compile(r"Th|Sa|Su|M|T|W|F")
+_PATTERN_ORDER = {"MW": 0, "TTh": 1, "F": 2}
+
+
+def ga_day_pattern(meeting_days: str) -> str:
+    """The GA day pattern (MW, TTh or F) a historical day string belongs to.
+
+    History often lists one section on two lines ("M" + "W"), so single days
+    are grouped under the pattern the GA schedules. Strings that fit no
+    pattern (MTWTh, MWF, Sa) are kept as they are.
+    """
+    days = set(_DAY_TOKEN.findall(meeting_days))
+    if days and days <= {"M", "W"}:
+        return "MW"
+    if days and days <= {"T", "Th"}:
+        return "TTh"
+    if days == {"F"}:
+        return "F"
+    return meeting_days
+
+
+def usual_day_patterns(
+    offerings: Iterable[tuple[str, str]],
+) -> dict[str, tuple[str, int, int]]:
+    """Each teacher's most frequent GA day pattern, by their own class count.
+
+    ``offerings`` holds (faculty key, meeting days) per historical offering.
+    Returns faculty key -> (pattern, classes on it, all classes). Unlike the
+    lift-ranked candidate above, this answers "which days does this teacher
+    usually teach". Ties go to MW, then TTh, then F, then the pattern text.
+    """
+    counts: dict[str, Counter] = defaultdict(Counter)
+    for faculty, days in offerings:
+        counts[faculty][ga_day_pattern(days)] += 1
+    result = {}
+    for faculty, patterns in counts.items():
+        pattern, count = min(
+            patterns.items(),
+            key=lambda item: (-item[1], _PATTERN_ORDER.get(item[0], 3), item[0]),
+        )
+        result[faculty] = (pattern, count, sum(patterns.values()))
+    return result
 
 
