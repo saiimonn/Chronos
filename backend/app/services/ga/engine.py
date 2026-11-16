@@ -160,7 +160,9 @@ class GAEngine:
             if reason is not None:
                 break
 
-            previous_best = generations[-1].best_fitness
+            # Compared on the full fitness, so a day-balance gain counts as
+            # progress even though the recorded metric leaves it out.
+            previous_best = best.fitness.values
             population = self._next_generation(population, rng)
             self._evaluate_population(population)
             generation += 1
@@ -170,7 +172,7 @@ class GAEngine:
             generations.append(self._record(generation, population, best))
             stagnant_generations = (
                 0
-                if generations[-1].best_fitness > previous_best
+                if best.fitness.values > previous_best
                 else stagnant_generations + 1
             )
             if first_feasible_generation is None and self._is_feasible(
@@ -335,6 +337,18 @@ class GAEngine:
     def _best(self, population: Sequence[list[ScheduleGene]]) -> list[ScheduleGene]:
         return max(population, key=attrgetter("fitness"))
 
+    def _reported_fitness(self, individual: list[ScheduleGene]) -> FitnessValues:
+        """The fitness as recorded: the third value is historical attainment.
+
+        With a day-balance weight the selection fitness adds the balance term
+        to attainment; stored metrics keep reporting attainment alone so the
+        recorded P(C) means the same in every run.
+        """
+        values = individual.fitness.values
+        if not self._day_balance_weight:
+            return values
+        return (values[0], values[1], self._evaluate.historical_attainment(individual))
+
     def _record(
         self,
         generation: int,
@@ -349,7 +363,7 @@ class GAEngine:
         ]
         return GenerationMetric(
             generation=generation,
-            best_fitness=best.fitness.values,
+            best_fitness=self._reported_fitness(best),
             mean_assignment_completeness=(
                 sum(resolved_counts) / (len(population) * offering_count)
             ),

@@ -367,8 +367,12 @@ class DeterministicRepairOperator:
                 assignments=assignments,
                 schedule_id=candidate.schedule_id,
             ),
-            repaired_section_ids=tuple(repaired),
-            unresolved_section_ids=tuple(unresolved),
+            # Reported in stable section order, whatever order repair
+            # visited the offerings in (labs go first).
+            repaired_section_ids=tuple(c for c in section_order if c in set(repaired)),
+            unresolved_section_ids=tuple(
+                c for c in section_order if c in set(unresolved)
+            ),
             report=self._constraint_engine.evaluate(
                 problem,
                 assignments,
