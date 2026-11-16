@@ -77,6 +77,7 @@ class GAEngine:
         repair_operator: RepairOperator | None = None,
         day_balance_weight: float = 0.0,
         repair_initial_population: bool = False,
+        block_day_span_minutes: int | None = None,
     ):
         self._problem = problem
         self._day_balance_weight = day_balance_weight
@@ -87,7 +88,10 @@ class GAEngine:
         self._constraint_engine = constraint_engine or ConstraintEngine()
         self._codec = ChromosomeCodec(problem)
         self._sampler = GeneSampler(
-            problem, config, locked_assignments=self._locked_assignments
+            problem,
+            config,
+            locked_assignments=self._locked_assignments,
+            day_span_minutes=block_day_span_minutes,
         )
         self._evaluate = LexicographicFitnessEvaluator(
             problem,
@@ -120,6 +124,7 @@ class GAEngine:
         repair_operator: RepairOperator | None = None,
         day_balance_weight: float = 0.0,
         repair_initial_population: bool = False,
+        block_day_span_minutes: int | None = None,
     ) -> "GAEngine":
         return cls(
             problem=context.selected_problem,
@@ -131,6 +136,7 @@ class GAEngine:
             repair_operator=repair_operator,
             day_balance_weight=day_balance_weight,
             repair_initial_population=repair_initial_population,
+            block_day_span_minutes=block_day_span_minutes,
         )
 
     def run(self) -> GARunResult:

@@ -114,6 +114,9 @@ def _encode_candidate(candidate: CandidateSchedule) -> JsonObject:
 
 
 _PUBLISHED_SECONDS = "published_attempt_processing_seconds"
+# Block day lengths a per-Block run tries, in order: 8 hours, then longer
+# only when a shorter day cannot hold every class without a conflict.
+BLOCK_DAY_SPAN_RETRIES = (8 * 60, 9 * 60, 10 * 60)
 
 
 def run_ga(payload: Mapping[str, Any]) -> JsonObject:
@@ -183,20 +186,42 @@ def _run_ga_block(payload: Mapping[str, Any]) -> JsonObject:
         if guidance is not None
         else ZeroHistoricalAttainmentScorer()
     )
-    result = GAEngine.from_block_context(
-        context,
-        decode_ga_config(payload["config"]),
-        historical_scorer=scorer,
-        # Master-schedule generation also evens out each Block's week.
-        day_balance_weight=DEFAULT_DAY_BALANCE_WEIGHT,
-        # A proposal must never come back double-booked: see GAEngine.
-        repair_initial_population=True,
-    ).run()
+    config = decode_ga_config(payload["config"])
+    # The Block day is held to 8 hours. Only when a run cannot place every
+    # class without a conflict is it retried with a longer day, and the first
+    # complete, conflict-free result wins; failing that, the one placing the
+    # most classes, then with the fewest conflicts.
+    result = None
+    for span_minutes in BLOCK_DAY_SPAN_RETRIES:
+        attempt = GAEngine.from_block_context(
+            context,
+            config,
+            historical_scorer=scorer,
+            # Master-schedule generation also evens out each Block's week.
+            day_balance_weight=DEFAULT_DAY_BALANCE_WEIGHT,
+            # A proposal must never come back double-booked: see GAEngine.
+            repair_initial_population=True,
+            block_day_span_minutes=span_minutes,
+        ).run()
+        rank = (
+            attempt.metrics.assigned_class_count,
+            -attempt.metrics.combined_hard_conflict_count,
+        )
+        if result is None or rank > best_rank:
+            result, best_rank, used_span = attempt, rank, span_minutes
+        if (
+            attempt.metrics.assigned_class_count
+            == attempt.metrics.required_class_count
+            and attempt.metrics.combined_hard_conflict_count == 0
+        ):
+            break
     output = _encode_ga_result(
         _encode_candidate(result.candidate),
         _encode_candidate_metrics(result.metrics),
         locks_enforced=True,
     )
+    # Over 8 hours only when the Block could not be placed in 8.
+    output["block_day_span_minutes"] = used_span
     output["historical_guidance"] = _guidance_result(
         guidance, scorer.score(context.selected_problem, result.candidate.assignments)
     )

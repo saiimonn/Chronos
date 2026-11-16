@@ -6,6 +6,8 @@ from uuid import UUID
 
 from app.domain import (
     Assignment,
+    BlockGenerationContext,
+    BlockSectionDTO,
     CandidateSchedule,
     ConflictCode,
     LockedAssignment,
@@ -15,6 +17,7 @@ from app.domain import (
 from app.domain.meeting_patterns import meeting_end, pattern_weekdays
 from app.services.ga import GAConfig, GAEngine, GeneSampler
 from app.services.ga.operators import BLOCK_DAY_SPAN_MINUTES, BLOCK_RUN_LIMIT_MINUTES
+from app.services.jobs import encode_block_ga_payload, run_ga
 from app.services.validation import ScheduleValidator
 from app.tests.support.ga import GA_TERM_ID, SECTION_LECTURE_ID, make_ga_problem
 
@@ -199,3 +202,39 @@ def test_a_block_run_moves_its_window_past_other_blocks_full_mornings():
     ).run()
     assert result.metrics.assignment_completeness == 1.0
     assert result.metrics.hard_conflict_count == 0
+
+
+def test_a_block_that_cannot_fit_eight_hours_is_retried_longer():
+    # Two MW classes whose only teachers are free at 07:30 and at 15:00: both
+    # fit only in a 9-hour day (07:30-16:30), so the 8-hour run leaves one out.
+    problem = _wide_grid_problem(classes_per_block=2, blocks=1)
+    early, late = problem.faculty
+    faculty = (
+        replace(early, availability_mask="100000000"),
+        replace(late, availability_mask="000001000"),
+    )
+    block = problem.classes[0]
+    context = BlockGenerationContext(
+        term=problem.term,
+        selected_block_id=block.block_id,
+        selected_block=BlockSectionDTO(
+            block_id=block.block_id, term_id=GA_TERM_ID, program_code=block.program_code,
+            year_level=block.year_level, section_letter=block.section_letter, capacity=20,
+        ),
+        selected_classes=problem.classes,
+        locked_assignments=(),
+        faculty=faculty,
+        subjects=problem.subjects,
+        rooms=problem.rooms,
+        programs=problem.programs,
+        time_slots=problem.time_slots,
+        offering_block_ids=problem.offering_block_ids,
+        base_schedule_id=None,
+    )
+    config = GAConfig(population_size=8, max_generations=5, tournament_size=2,
+                      random_seed=1, meeting_day_patterns=("MW",))
+
+    result = run_ga(encode_block_ga_payload(context, config))
+
+    assert result["metrics"]["assigned_class_count"] == 2
+    assert result["block_day_span_minutes"] == 9 * 60
