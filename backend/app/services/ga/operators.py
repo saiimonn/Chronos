@@ -367,9 +367,12 @@ class GeneSampler:
                 if _fits(window, *single[slot_id])
             )
 
-        # Other Blocks' locked meetings, by teacher and by room.
+        # Other Blocks' locked meetings, by teacher and by room, and the units
+        # each teacher already carries, so a full teacher is not counted as open.
         busy: dict[object, list[tuple[frozenset, int, int]]] = {}
+        carried: Counter[UUID] = Counter()
         for lock in locked_assignments:
+            carried[lock.faculty_id] += lock.units
             if lock.time_slot_id not in self._slots_by_id or not lock.meeting_days:
                 continue
             start, end = meeting(lock.time_slot_id, lock.meeting_days)
@@ -383,12 +386,23 @@ class GeneSampler:
                 for other_days, other_start, other_end in busy.get(key, ())
             )
 
+        capacity = {member.faculty_id: member.max_workload for member in problem.faculty}
+        units = {s.subject_code: s.units for s in problem.subjects}
+        subject_code = {c.class_id: c.subject_code for c in problem.classes}
+
         def open_times(offering_id: UUID, window: DayWindow) -> int:
-            """Start times and patterns with a free teacher and a free room."""
+            """Start times and patterns with a free teacher who still has room
+            for the class's units, and a free room."""
             options = set()
-            patterns = self._first_choice_patterns[offering_id]
+            # Every pattern the GA may fall back to, not just the preferred one.
+            patterns = self._meeting_day_patterns[offering_id]
             rooms = self._room_pools[offering_id]
+            needed = units.get(
+                subject_code[self._codec.class_ids_for(offering_id)[0]], 0
+            )
             for faculty_id in self._faculty_pools[offering_id]:
+                if carried[faculty_id] + needed > capacity.get(faculty_id, 0):
+                    continue
                 for slot_id in inside(offering_id, faculty_id, window):
                     for pattern in patterns:
                         if (slot_id, pattern) in options:
@@ -424,16 +438,23 @@ class GeneSampler:
             # classes unplaced while later windows stand empty.
             enough = 2 * len(offerings)
 
-            def roomy(window: DayWindow) -> int:
+            def roomy(window: DayWindow) -> tuple[int, int]:
+                """Offerings with any open time, then open times up to enough."""
                 if not busy:
-                    return 0
-                return sum(min(open_times(o, window), enough) for o in offerings)
+                    return (0, 0)
+                counts = [open_times(o, window) for o in offerings]
+                return (
+                    sum(count > 0 for count in counts),
+                    sum(min(count, enough) for count in counts),
+                )
 
+            room_scores = {w: roomy(w) for w in options}
             window = max(
                 options,
                 key=lambda w: (
+                    room_scores[w][0],
                     placeable(w),
-                    roomy(w),
+                    room_scores[w][1],
                     -used_span[w[:2]],
                     fit.get(w, (1 << 30, 0, 0)),
                     -used[w],
