@@ -1,4 +1,4 @@
-"""Compact Block days: a soft sampler bias toward a 9h (10h with a break) day."""
+"""Compact Block days: a soft sampler bias toward a day of at most 8 hours."""
 
 from dataclasses import replace
 from datetime import time
@@ -29,13 +29,12 @@ def _h(hour: int, minute: int = 0) -> int:
     return hour * 60 + minute
 
 
-def test_compact_day_allows_nine_hours_or_ten_with_a_break():
-    assert _compact_day([(_h(7, 30), _h(9)), (_h(15), _h(16, 30))])
-    assert _compact_day([(_h(10, 30), _h(12)), (_h(18), _h(19, 30))])
-    # 07:30-17:30 with a 12:00-13:30 break.
-    assert _compact_day([(_h(7, 30), _h(12)), (_h(13, 30), _h(17, 30))])
-    # 07:30-17:30 back to back has no break.
-    assert not _compact_day([(_h(7, 30), _h(12, 30)), (_h(12, 30), _h(17, 30))])
+def test_compact_day_allows_at_most_eight_hours():
+    assert _compact_day([(_h(7, 30), _h(9)), (_h(14), _h(15, 30))])
+    assert _compact_day([(_h(11, 30), _h(13)), (_h(18), _h(19, 30))])
+    # 07:30-16:30 is 9h, even with a break.
+    assert not _compact_day([(_h(7, 30), _h(9)), (_h(15), _h(16, 30))])
+    assert not _compact_day([(_h(7, 30), _h(12)), (_h(13, 30), _h(16, 30))])
     assert not _compact_day([(_h(7, 30), _h(9)), (_h(18), _h(19, 30))])
 
 
@@ -101,11 +100,11 @@ def test_slot_draws_favor_a_compact_block_day():
         for _ in range(3000)
     ]
 
-    # Starts up to 15:00 end by 16:30: six of nine slots keep the day at 9h.
-    compact_share = sum(start <= time(15) for start in drawn) / len(drawn)
+    # Starts up to 13:30 end by 15:00: five of nine slots keep the day within 8h.
+    compact_share = sum(start <= time(13, 30) for start in drawn) / len(drawn)
     expected = COMPACT_BLOCK_DAY_PROBABILITY + (
         1 - COMPACT_BLOCK_DAY_PROBABILITY
-    ) * 6 / 9
+    ) * 5 / 9
     assert abs(compact_share - expected) < 0.03
     # Soft: late slots stay reachable.
     assert time(19, 30) in drawn
