@@ -108,12 +108,12 @@ def list_historical_terms(db: Session) -> list[dict]:
 
     policy = HistoricalInclusionPolicy()
 
-    def eligible_streams(academic_year: str) -> list[str]:
+    def eligible_streams(academic_year: str, term_number: int) -> list[str]:
         try:
             return [
                 stream.value
                 for stream in PatternStream
-                if policy.is_eligible(stream, academic_year)
+                if policy.is_term_eligible(stream, academic_year, term_number)
             ]
         except ValueError:
             # A stored year the policy cannot parse is reported as eligible for
@@ -132,7 +132,9 @@ def list_historical_terms(db: Session) -> list[dict]:
             "term_number": snapshot.term_number,
             "captured_at": snapshot.captured_at,
             "record_count": record_count,
-            "eligible_streams": eligible_streams(snapshot.academic_year),
+            "eligible_streams": eligible_streams(
+                snapshot.academic_year, snapshot.term_number
+            ),
         }
         for snapshot, record_count in rows
     ]
