@@ -5,6 +5,7 @@ import { ApiError, api, type Readiness, type Term } from "../api/client";
 import Sidebar from "../components/layout/Sidebar";
 import BlockerFixLink from "../components/readiness/BlockerFixLink";
 import ReadinessWarnings from "../components/readiness/ReadinessWarnings";
+import ScheduleQualityPanel from "../components/metrics/ScheduleQualityPanel";
 import TopBar from "../components/layout/TopBar";
 import { usePeriodicSync } from "../hooks/usePeriodicSync";
 
@@ -169,6 +170,8 @@ export default function DashboardPage() {
                     </article>
                   ))}
                 </section>
+
+                <ScheduleQualityPanel termId={data.term.term_id} />
               </div>
             )}
           </div>

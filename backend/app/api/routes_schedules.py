@@ -18,6 +18,7 @@ from app.schemas.schedule import (
     TimetableProjectionResponse,
     ValidationResponse,
 )
+from app.schemas.schedule_metrics import ScheduleMetricsResponse
 from app.services import schedules as service
 from app.services.audit import audit_rejections
 
@@ -125,6 +126,12 @@ def update_assignment(
         "schedule": service.serialize_schedule(schedule),
         "validation": service.serialize_validation(validation),
     }
+
+
+@router.get("/{schedule_id}/metrics", response_model=ScheduleMetricsResponse)
+def read_schedule_metrics(schedule_id: UUID, db: DbSession) -> dict:
+    """Quality and resource-utilization metrics of one schedule (read-only)."""
+    return service.schedule_metrics(db, schedule_id)
 
 
 @router.post("/{schedule_id}/validate", response_model=ValidationResponse)

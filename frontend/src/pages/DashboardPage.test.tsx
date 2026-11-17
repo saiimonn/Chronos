@@ -19,6 +19,8 @@ vi.mock("../api/client", async (importOriginal) => {
       listCoursePrograms: vi.fn(),
       listBlocks: vi.fn(),
       listTimeSlots: vi.fn(),
+      getMasterSchedule: vi.fn(),
+      getScheduleMetrics: vi.fn(),
     },
   };
 });
@@ -46,6 +48,7 @@ beforeEach(() => {
   vi.mocked(api.listCoursePrograms).mockResolvedValue(countOf(2) as never);
   vi.mocked(api.listBlocks).mockResolvedValue(countOf(9) as never);
   vi.mocked(api.listTimeSlots).mockResolvedValue(countOf(6) as never);
+  vi.mocked(api.getMasterSchedule).mockResolvedValue(null);
 });
 
 afterEach(() => vi.restoreAllMocks());
