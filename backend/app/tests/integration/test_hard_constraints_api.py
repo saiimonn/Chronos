@@ -42,8 +42,9 @@ def test_saved_limits_reach_new_problems(db_session: Session):
 
 
 def test_only_administrators_save_and_bad_limits_are_refused(db_session: Session):
-    defaults = make_api_client(db_session).get(URL).json()["defaults"]
+    scheduler = make_api_client(db_session)
+    defaults = scheduler.get(URL).json()["defaults"]
 
-    assert make_api_client(db_session).put(URL, json=defaults).status_code == 403
+    assert scheduler.put(URL, json=defaults).status_code == 403
     bad = {**defaults, "block_day_target_hours": 12}
     assert _admin(db_session).put(URL, json=bad).status_code == 422
