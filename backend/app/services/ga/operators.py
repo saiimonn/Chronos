@@ -470,11 +470,27 @@ class GeneSampler:
         used: Counter[DayWindow] = Counter()
         used_span: Counter[tuple[int, int]] = Counter()
         for group, offerings in free.items():
+            pins = pinned.get(group, ())
             options = [
-                window
-                for window in windows
-                if all(_fits(window, *span) for span in pinned.get(group, ()))
-            ] or windows
+                window for window in windows if all(_fits(window, *span) for span in pins)
+            ]
+            if not options and pins:
+                # The fixed classes (shared with or paired to a Block already
+                # generated) leave no break that keeps every run under 6 hours.
+                # Keep the day's length and drop the break; the validator still
+                # reports a 6-hour run if one forms.
+                options = [
+                    (low, high, high, high)
+                    for low, high in spans
+                    if all(low <= start and end <= high for start, end in pins)
+                ]
+            if not options and pins:
+                # The fixed classes alone run longer than the window: the free
+                # ones stay within their span, so the day grows no further.
+                low = min(start for start, _ in pins)
+                high = max(end for _, end in pins)
+                options = [(low, high, high, high)]
+            options = options or windows
 
             def placeable(window: DayWindow) -> int:
                 return sum(

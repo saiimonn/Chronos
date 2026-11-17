@@ -79,12 +79,17 @@ def with_partner_lab_classes(
     instead, through its lock.
     """
     held = {lock.class_id for lock in context.locked_assignments}
+    # A partner Block that already has accepted or proposed classes was
+    # generated before this one: a LAB it left unplaced stays its own to fix,
+    # and reserving it now would only block a teacher and room for nothing.
+    generated = {lock.block_id for lock in context.locked_assignments}
     by_id = {section.class_id: section for section in problem.classes}
     partners = tuple(
         by_id[partner_id]
         for section in context.selected_classes
         if (partner_id := context.lab_partners.get(section.class_id)) in by_id
         and partner_id not in held
+        and by_id[partner_id].block_id not in generated
     )
     return replace(context, partner_lab_classes=partners) if partners else context
 
