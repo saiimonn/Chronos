@@ -512,6 +512,36 @@ def encode_ga_payload(
     }
 
 
+def _encode_block_class(item: BlockClassDTO) -> dict[str, Any]:
+    return {
+        "class_id": str(item.class_id),
+        "block_id": str(item.block_id),
+        "term_id": str(item.term_id),
+        "offering_id": str(item.offering_id),
+        "group_no": item.group_no,
+        "subject_code": item.subject_code,
+        "program_code": item.program_code,
+        "year_level": item.year_level,
+        "section_letter": item.section_letter,
+        "capacity": item.capacity,
+    }
+
+
+def _decode_block_class(item: Mapping[str, Any]) -> BlockClassDTO:
+    return BlockClassDTO(
+        class_id=UUID(item["class_id"]),
+        block_id=UUID(item["block_id"]),
+        term_id=UUID(item["term_id"]),
+        offering_id=UUID(item["offering_id"]),
+        group_no=item["group_no"],
+        subject_code=item["subject_code"],
+        program_code=item["program_code"],
+        year_level=item["year_level"],
+        section_letter=item["section_letter"],
+        capacity=item["capacity"],
+    )
+
+
 def encode_block_generation_context(context: BlockGenerationContext) -> JsonObject:
     return {
         "version": CODEC_VERSION,
@@ -532,20 +562,18 @@ def encode_block_generation_context(context: BlockGenerationContext) -> JsonObje
                 "capacity": context.selected_block.capacity,
             },
             "selected_classes": [
-                {
-                    "class_id": str(item.class_id),
-                    "block_id": str(item.block_id),
-                    "term_id": str(item.term_id),
-                    "offering_id": str(item.offering_id),
-                    "group_no": item.group_no,
-                    "subject_code": item.subject_code,
-                    "program_code": item.program_code,
-                    "year_level": item.year_level,
-                    "section_letter": item.section_letter,
-                    "capacity": item.capacity,
-                }
-                for item in context.selected_classes
+                _encode_block_class(item) for item in context.selected_classes
             ],
+            # Only when set, so a Block without one encodes as before.
+            **(
+                {
+                    "partner_lab_classes": [
+                        _encode_block_class(item) for item in context.partner_lab_classes
+                    ]
+                }
+                if context.partner_lab_classes
+                else {}
+            ),
             "locked_assignments": [
                 {
                     "class_id": str(item.class_id),
@@ -564,16 +592,7 @@ def encode_block_generation_context(context: BlockGenerationContext) -> JsonObje
             "faculty": [
                 _encode_faculty(item) for item in context.faculty
             ],
-            "subjects": [
-                {
-                    "subject_code": item.subject_code,
-                    "subject_title": item.subject_title,
-                    "units": item.units,
-                    "subject_type": item.subject_type.value,
-                    "is_active": item.is_active,
-                }
-                for item in context.subjects
-            ],
+            "subjects": [_encode_subject(item) for item in context.subjects],
             "rooms": [
                 {
                     "room_code": item.room_code,
@@ -648,19 +667,10 @@ def decode_block_generation_context(value: Mapping[str, Any]) -> BlockGeneration
             capacity=ctx["selected_block"]["capacity"],
         ),
         selected_classes=tuple(
-            BlockClassDTO(
-                class_id=UUID(item["class_id"]),
-                block_id=UUID(item["block_id"]),
-                term_id=UUID(item["term_id"]),
-                offering_id=UUID(item["offering_id"]),
-                group_no=item["group_no"],
-                subject_code=item["subject_code"],
-                program_code=item["program_code"],
-                year_level=item["year_level"],
-                section_letter=item["section_letter"],
-                capacity=item["capacity"],
-            )
-            for item in ctx["selected_classes"]
+            _decode_block_class(item) for item in ctx["selected_classes"]
+        ),
+        partner_lab_classes=tuple(
+            _decode_block_class(item) for item in ctx.get("partner_lab_classes", ())
         ),
         locked_assignments=tuple(
             LockedAssignment(

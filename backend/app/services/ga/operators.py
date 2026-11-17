@@ -6,7 +6,9 @@ run is reproducible from its seed alone. DEAP stock operators are not used
 because they draw from the ``random`` module globals.
 """
 
+from collections import Counter, defaultdict
 from collections.abc import Sequence
+from datetime import time
 from random import Random
 from uuid import UUID
 
@@ -14,6 +16,7 @@ from app.domain import LockedAssignment, RoomType, SchedulingProblem, SubjectTyp
 from app.domain.meeting_patterns import (
     continuation_slots,
     first_choice_patterns,
+    meeting_end,
     pattern_weekdays,
     sessions_per_meeting,
     subject_meeting_patterns,
@@ -38,6 +41,46 @@ _GENE_SWAP_PROBABILITY = 0.5
 # other legal teacher reachable, so a preference never blocks an assignment
 # and never crowds one teacher past their load on every draw.
 PREFERRED_FACULTY_PROBABILITY = 0.75
+# Longest a Block's day may run, first class start to last class end. Every
+# Block gets one fixed window of this length and its Offerings only draw start
+# slots inside it, so sampling, mutation, crossover and repair can never build
+# a longer day. This narrows the search space like an availability mask does;
+# fitness F(C) = <A, -H, P> and the hard constraints are unchanged.
+BLOCK_DAY_SPAN_MINUTES = 8 * 60
+# A Block may not sit through this long of back-to-back classes (exactly 6h
+# counts). Each Block's window keeps one break slot free so the stretches
+# before and after it both stay shorter. The validator flags any run that
+# still reaches it (BLOCK_CONSECUTIVE_EXCEEDED), outside the GA's H(C).
+BLOCK_RUN_LIMIT_MINUTES = 6 * 60
+# The longest a Block's day may ever run. A run that cannot place every class
+# in 8 hours is retried up to this, and a class no teacher can hold inside
+# its Block's window may stretch past the window only as far as this allows.
+BLOCK_DAY_SPAN_LIMIT_MINUTES = 10 * 60
+
+# (window start, window end, break start, break end) in minutes since midnight.
+DayWindow = tuple[int, int, int, int]
+
+
+def _minutes(value: time) -> int:
+    return value.hour * 60 + value.minute
+
+
+def _fits(window: DayWindow, start: int, end: int) -> bool:
+    """A meeting from ``start`` to ``end`` lies in the window, off its break."""
+    low, high, rest_start, rest_end = window
+    return low <= start and end <= high and (end <= rest_start or start >= rest_end)
+
+
+def _fits_stretched(window: DayWindow, start: int, end: int) -> bool:
+    """Off the window's break, and keeping the Block's day, whatever of the
+    window it uses, within BLOCK_DAY_SPAN_LIMIT_MINUTES."""
+    low, high, rest_start, rest_end = window
+    return (
+        start >= high - BLOCK_DAY_SPAN_LIMIT_MINUTES
+        and end <= low + BLOCK_DAY_SPAN_LIMIT_MINUTES
+        # A window without a break marks it as empty (rest_start == rest_end).
+        and (rest_start == rest_end or end <= rest_start or start >= rest_end)
+    )
 
 
 class GeneSampler:
@@ -55,8 +98,13 @@ class GeneSampler:
         problem: SchedulingProblem,
         config: GAConfig,
         availability_codec: AvailabilityMaskCodec | None = None,
+        locked_assignments: Sequence[LockedAssignment] = (),
+        day_span_minutes: int | None = None,
     ):
         codec = availability_codec or AvailabilityMaskCodec()
+        # The Block day's length; a run that cannot place every class at
+        # 8 hours may be retried longer (see app.services.jobs.handlers).
+        self._day_span = day_span_minutes or BLOCK_DAY_SPAN_MINUTES
         self._config = config
         self._codec = ChromosomeCodec(problem)
         self._offering_ids = self._codec.offering_ids
@@ -102,6 +150,14 @@ class GeneSampler:
         self._first_choice_patterns: dict[UUID, tuple[str, ...]] = {}
         # Friday-only meetings need the slot after each start free as well.
         self._time_slots = tuple(problem.time_slots)
+        self._slots_by_id = {slot.time_slot_id: slot for slot in problem.time_slots}
+        # Each narrowed Offering's Block day window, break included.
+        self._day_windows: dict[UUID, DayWindow] = {}
+        # Offerings let past their window, up to the day limit (see below).
+        self._stretched: set[UUID] = set()
+        self._block_of_class = {
+            section.class_id: section.block_id for section in problem.classes
+        }
         self._available_by_faculty = available_by_faculty
         self._double_pools: dict[tuple[UUID, UUID, str], tuple[UUID, ...]] = {}
         # Terms 1-2 draw the configured MW/TTh/F patterns; term 3 is MTWTh.
@@ -182,6 +238,8 @@ class GeneSampler:
             if partner_lab is not None:
                 self._pin_time(offering_id, partner_lab)
 
+        self._fit_block_day_windows(problem, locked_assignments)
+
         for offering_id, pool in self._faculty_pools.items():
             fans = preferring.get(subject_of_offering[offering_id], set())
             self._preferred_faculty_pools[offering_id] = tuple(
@@ -194,6 +252,314 @@ class GeneSampler:
             for class_id, partner_id in problem.lab_partners.items()
             if class_id in offering_of and partner_id in offering_of
         }
+
+    def _fit_block_day_windows(
+        self,
+        problem: SchedulingProblem,
+        locked_assignments: Sequence[LockedAssignment] = (),
+    ) -> None:
+        """Narrow each Offering's start slots to its Blocks' 8-hour window,
+        minus one short break that keeps every back-to-back run under 6 hours.
+
+        Blocks that share an Offering share a window. Each group takes the
+        window that keeps the most of its Offerings placeable, then the one
+        where its Offerings keep the most open times around other Blocks'
+        locked classes (a per-Block run would otherwise take the same early
+        window as every Block before it and find it full), then the span
+        fewest groups use (spreading Blocks eases room and teacher clashes),
+        then the break that leaves room for the most classes (a mid-morning
+        break can cost a 2.5h lab), then the earliest. A window must
+        hold the group's pinned placements, and pinned Offerings keep their
+        single legal slot.
+        """
+        def meeting(slot_id: UUID, pattern: str | None) -> tuple[int, int]:
+            slot = self._slots_by_id[slot_id]
+            return _minutes(slot.start_time), _minutes(meeting_end(slot, pattern))
+
+        starts = sorted({_minutes(slot.start_time) for slot in self._time_slots})
+        if not starts:
+            return
+        day_end = max(_minutes(slot.end_time) for slot in self._time_slots)
+        spans = [
+            (start, start + self._day_span)
+            for start in starts
+            if start + self._day_span <= day_end
+        ] or [(starts[0], starts[0] + self._day_span)]
+        sessions = sorted(
+            {meeting(slot.time_slot_id, None) for slot in self._time_slots}
+        )
+
+        # A break one grid step long (30 minutes on the canonical grid) is
+        # enough: classes only run back to back when one starts as the
+        # previous one ends.
+        step = min((b - a for a, b in zip(starts, starts[1:])), default=30)
+        lengths = sorted({b - a for a, b in sessions})
+        # How many classes of each length still fit around each window's
+        # break (more is better), then the fewest minutes too short for one,
+        # then how even the split is.
+        fit: dict[DayWindow, tuple[int, int, int]] = {}
+
+        def with_breaks(low: int, high: int) -> list[DayWindow]:
+            inner = [(a, b) for a, b in sessions if low <= a and b <= high]
+            # Slots that touch or overlap chain into one back-to-back stretch;
+            # an 8-hour window holds at most one stretch of 6 hours or more.
+            chains: list[list[tuple[int, int]]] = []
+            for a, b in inner:
+                if chains and a <= max(end for _, end in chains[-1]):
+                    chains[-1].append((a, b))
+                else:
+                    chains.append([(a, b)])
+            for chain in chains:
+                first = chain[0][0]
+                last = max(end for _, end in chain)
+                if last - first < BLOCK_RUN_LIMIT_MINUTES:
+                    continue
+                # Every break that leaves both sides under the limit, so
+                # Blocks sharing a window can rest at different times.
+                options = [
+                    (low, high, rest, rest + step)
+                    for rest in starts
+                    if first < rest < last
+                    and rest - first < BLOCK_RUN_LIMIT_MINUTES
+                    and last - (rest + step) < BLOCK_RUN_LIMIT_MINUTES
+                ]
+                for option in options:
+                    before, after = option[2] - first, last - option[3]
+                    fit[option] = (
+                        sum(before // n + after // n for n in lengths),
+                        -sum(before % n + after % n for n in lengths),
+                        -abs(before - after),
+                    )
+                if options:
+                    return options
+                # ponytail: no single step splits the stretch under 6h (a
+                # window over 12h); the most even break still shortens it.
+                middle = min(starts, key=lambda rest: abs(2 * rest - first - last))
+                return [(low, high, middle, middle + step)]
+            return [(low, high, high, high)]
+
+        windows = [w for low, high in spans for w in with_breaks(low, high)]
+
+        parent: dict[UUID, UUID] = {}
+
+        def root(block: UUID) -> UUID:
+            while parent.setdefault(block, block) != block:
+                block = parent[block]
+            return block
+
+        blocks_of = {
+            offering_id: [
+                self._block_of_class[class_id]
+                for class_id in self._codec.class_ids_for(offering_id)
+            ]
+            for offering_id in self._offering_ids
+        }
+        for blocks in blocks_of.values():
+            for block in blocks[1:]:
+                parent[root(block)] = root(blocks[0])
+        # A LAB and its partner placed in the same run meet together, so their
+        # Blocks take one window.
+        for class_id, partner_id in problem.lab_partners.items():
+            if class_id in self._block_of_class and partner_id in self._block_of_class:
+                parent[root(self._block_of_class[partner_id])] = root(
+                    self._block_of_class[class_id]
+                )
+
+        fixed = {**problem.paired_lab_placements, **problem.shared_placements}
+        free: dict[UUID, list[UUID]] = {}
+        pinned: dict[UUID, list[tuple[int, int]]] = {}
+        for offering_id in self._offering_ids:
+            group = root(blocks_of[offering_id][0])
+            placement = fixed.get(offering_id)
+            if placement is None:
+                free.setdefault(group, []).append(offering_id)
+            elif placement.time_slot_id in self._slots_by_id:
+                pinned.setdefault(group, []).append(
+                    meeting(placement.time_slot_id, placement.meeting_days)
+                )
+
+        pool_keys: dict[UUID, list[UUID]] = {}
+        for offering_id, faculty_id in self._time_slot_pools:
+            pool_keys.setdefault(offering_id, []).append(faculty_id)
+
+        single = {
+            slot.time_slot_id: meeting(slot.time_slot_id, None)
+            for slot in self._time_slots
+        }
+
+        def inside(offering_id: UUID, faculty_id: UUID, window: DayWindow):
+            # One session; a two-session pattern's later end is checked per
+            # pattern in time_slot_pool.
+            return tuple(
+                slot_id
+                for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
+                if _fits(window, *single[slot_id])
+            )
+
+        # Other Blocks' locked meetings, by teacher and by room, and the units
+        # each teacher already carries, so a full teacher is not counted as open.
+        busy: dict[object, list[tuple[frozenset, int, int]]] = {}
+        carried: Counter[UUID] = Counter()
+        for lock in locked_assignments:
+            carried[lock.faculty_id] += lock.units
+            if lock.time_slot_id not in self._slots_by_id or not lock.meeting_days:
+                continue
+            start, end = meeting(lock.time_slot_id, lock.meeting_days)
+            entry = (pattern_weekdays(lock.meeting_days), start, end)
+            busy.setdefault(lock.faculty_id, []).append(entry)
+            busy.setdefault(("room", lock.room_code), []).append(entry)
+
+        def idle(key: object, days: frozenset, start: int, end: int) -> bool:
+            return not any(
+                days & other_days and start < other_end and other_start < end
+                for other_days, other_start, other_end in busy.get(key, ())
+            )
+
+        capacity = {member.faculty_id: member.max_workload for member in problem.faculty}
+        units = {s.subject_code: s.units for s in problem.subjects}
+        subject_code = {c.class_id: c.subject_code for c in problem.classes}
+
+        own_classes = {section.class_id for section in problem.classes}
+
+        def needs_spare(offering_id: UUID) -> bool:
+            """A paired LAB whose partner Block is not in this run: the partner
+            must later meet at this LAB's exact time, so it needs a second
+            teacher and room free then."""
+            return any(
+                problem.lab_partners.get(class_id) is not None
+                and problem.lab_partners[class_id] not in own_classes
+                for class_id in self._codec.class_ids_for(offering_id)
+            )
+
+        def open_times(offering_id: UUID, window: DayWindow) -> int:
+            """Start times and patterns with a free teacher who still has room
+            for the class's units, and a free room; for a paired LAB, two of
+            each, so its partner can follow."""
+            # Every pattern the GA may fall back to, not just the preferred one.
+            patterns = self._meeting_day_patterns[offering_id]
+            rooms = self._room_pools[offering_id]
+            needed = units.get(
+                subject_code[self._codec.class_ids_for(offering_id)[0]], 0
+            )
+            teachers: dict[tuple[UUID, str], set[UUID]] = defaultdict(set)
+            free_rooms: dict[tuple[UUID, str], int] = {}
+            for faculty_id in self._faculty_pools[offering_id]:
+                if carried[faculty_id] + needed > capacity.get(faculty_id, 0):
+                    continue
+                for slot_id in inside(offering_id, faculty_id, window):
+                    for pattern in patterns:
+                        start, end = meeting(slot_id, pattern)
+                        if not _fits(window, start, end):
+                            continue
+                        days = pattern_weekdays(pattern)
+                        if not idle(faculty_id, days, start, end):
+                            continue
+                        key = (slot_id, pattern)
+                        if key not in free_rooms:
+                            free_rooms[key] = sum(
+                                idle(("room", room), days, start, end) for room in rooms
+                            )
+                        teachers[key].add(faculty_id)
+            least = 2 if needs_spare(offering_id) else 1
+            return sum(
+                1
+                for key, who in teachers.items()
+                if len(who) >= least and free_rooms[key] >= least
+            )
+
+        used: Counter[DayWindow] = Counter()
+        used_span: Counter[tuple[int, int]] = Counter()
+        for group, offerings in free.items():
+            pins = pinned.get(group, ())
+            options = [
+                window for window in windows if all(_fits(window, *span) for span in pins)
+            ]
+            if not options and pins:
+                # The fixed classes (shared with or paired to a Block already
+                # generated) leave no break that keeps every run under 6 hours.
+                # Keep the day's length and drop the break; the validator still
+                # reports a 6-hour run if one forms.
+                options = [
+                    (low, high, high, high)
+                    for low, high in spans
+                    if all(low <= start and end <= high for start, end in pins)
+                ]
+            if not options and pins:
+                # The fixed classes alone run longer than the window: the free
+                # ones stay within their span, so the day grows no further.
+                low = min(start for start, _ in pins)
+                high = max(end for _, end in pins)
+                options = [(low, high, high, high)]
+            options = options or windows
+
+            def placeable(window: DayWindow) -> int:
+                return sum(
+                    any(inside(o, f, window) for f in self._faculty_pools[o])
+                    for o in offerings
+                )
+
+            # ponytail: enough open times is a heuristic (twice the group's
+            # class count, so its own classes can avoid one another); it does
+            # not prove the Block fits. Raise the cap if runs still leave
+            # classes unplaced while later windows stand empty.
+            enough = 2 * len(offerings)
+
+            def roomy(window: DayWindow) -> tuple[int, int]:
+                """Offerings with any open time, then open times up to enough."""
+                if not busy:
+                    return (0, 0)
+                counts = [open_times(o, window) for o in offerings]
+                return (
+                    sum(count > 0 for count in counts),
+                    sum(min(count, enough) for count in counts),
+                )
+
+            room_scores = {w: roomy(w) for w in options}
+            window = max(
+                options,
+                key=lambda w: (
+                    room_scores[w][0],
+                    placeable(w),
+                    room_scores[w][1],
+                    -used_span[w[:2]],
+                    fit.get(w, (1 << 30, 0, 0)),
+                    -used[w],
+                    -w[0],
+                    -w[2],
+                ),
+            )
+            used[window] += 1
+            used_span[window[:2]] += 1
+            for offering_id in offerings:
+                narrowed = {
+                    faculty_id: inside(offering_id, faculty_id, window)
+                    for faculty_id in pool_keys.get(offering_id, ())
+                }
+                faculty_pool = tuple(
+                    f for f in self._faculty_pools[offering_id] if narrowed[f]
+                )
+                # No teacher can hold it inside the window: let it out of the
+                # window, but only as far as a BLOCK_DAY_SPAN_LIMIT_MINUTES
+                # day, and never across the break. Past that it stays
+                # unplaced for the administrator to decide.
+                if not faculty_pool:
+                    narrowed = {
+                        faculty_id: tuple(
+                            slot_id
+                            for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
+                            if _fits_stretched(window, *single[slot_id])
+                        )
+                        for faculty_id in pool_keys.get(offering_id, ())
+                    }
+                    faculty_pool = tuple(
+                        f for f in self._faculty_pools[offering_id] if narrowed[f]
+                    )
+                    self._stretched.add(offering_id)
+                self._time_slot_pools.update(
+                    ((offering_id, f), slots) for f, slots in narrowed.items()
+                )
+                self._faculty_pools[offering_id] = faculty_pool
+                self._day_windows[offering_id] = window
 
     def _pin(self, offering_id: UUID, pinned: LockedAssignment) -> None:
         slot_legal = pinned.time_slot_id in self._time_slot_pools.get(
@@ -302,8 +668,21 @@ class GeneSampler:
                     chain = continuation_slots(
                         slots[slot_id], meeting_days, self._time_slots
                     )
-                    if chain is not None and all(
-                        s.time_slot_id in available for s in chain
+                    if (
+                        chain is not None
+                        and all(s.time_slot_id in available for s in chain)
+                        and (
+                            offering_id not in self._day_windows
+                            or (
+                                _fits_stretched
+                                if offering_id in self._stretched
+                                else _fits
+                            )(
+                                self._day_windows[offering_id],
+                                _minutes(slots[slot_id].start_time),
+                                _minutes(meeting_end(slots[slot_id], meeting_days)),
+                            )
+                        )
                     ):
                         kept.append(slot_id)
             self._double_pools[key] = tuple(kept)

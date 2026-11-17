@@ -19,7 +19,8 @@ from app.services.validation import (
     decode_day_masks,
     encode_day_masks,
 )
-from app.tests.unit.test_meeting_patterns import (
+from app.tests.unit.test_meeting_patterns import (  # noqa: F401
+    whole_day_blocks,
     CLASS_ID,
     FACULTY_ID,
     OTHER_FACULTY_ID,
@@ -112,6 +113,7 @@ def test_a_day_can_open_hours_the_default_closes():
 # --- GA ---------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("whole_day_blocks")
 def test_the_ga_draws_mw_only_where_monday_is_free():
     problem = _with_days(_problem(1), "MON:100")
     sampler = GeneSampler(problem, _config(("MW", "TTh")))
