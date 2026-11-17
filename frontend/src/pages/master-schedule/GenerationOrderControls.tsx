@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ListOrdered } from "lucide-react";
 import type { BlockSection } from "../../api/client";
 import {
   RANK_LABELS,
@@ -37,9 +37,12 @@ export default function GenerationOrderControls({ blocks, order, onChange, disab
 
   return (
     <details className="mt-3 group">
-      <summary className="cursor-pointer select-none text-sm min-h-11 flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-        <span className="font-medium">Generation order</span>
+      {/* Styled as a button so it reads as one: it opens the order settings. */}
+      <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none text-sm min-h-11 inline-flex max-w-full items-center gap-2 px-3 rounded-lg border border-outline-variant bg-surface-container-lowest shadow-sm hover:border-primary hover:bg-primary/5 group-open:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <ListOrdered className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
+        <span className="font-semibold">Generation order</span>
         <span className="text-on-surface-variant truncate">{summary}</span>
+        <ChevronDown className="w-4 h-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
       </summary>
       <div className="pt-2 space-y-3">
         <p className="text-sm text-on-surface-variant">

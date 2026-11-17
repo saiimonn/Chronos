@@ -516,7 +516,7 @@ it("approves every selected proposal at once, re-checking each in turn", async (
   expect(screen.getByText("Nothing selected")).toBeInTheDocument();
 });
 
-it("lists Blocks by year, then BSCS, BSIT, BSIS, then letter when no filter is set", async () => {
+it("lists Blocks in the generation order: by program, then year, unless set to year first", async () => {
   const mixed = [
     { ...blocks[0], block_id: "is-1a", program_code: "BSIS", year_level: 1, section_letter: "A", name: "BSIS 1-A" },
     { ...blocks[0], block_id: "cs-2a", program_code: "BSCS", year_level: 2, section_letter: "A", name: "BSCS 2-A" },
@@ -528,8 +528,12 @@ it("lists Blocks by year, then BSCS, BSIT, BSIS, then letter when no filter is s
   renderPage();
 
   const list = await screen.findByRole("list", { name: "Blocks" });
-  const order = within(list).getAllByRole("listitem").map((item) => item.getAttribute("data-block-row"));
-  expect(order).toEqual(["cs-1a", "cs-1b", "it-1a", "is-1a", "cs-2a"]);
+  const rowOrder = () => within(list).getAllByRole("listitem").map((item) => item.getAttribute("data-block-row"));
+  // The default generation order: BSCS, BSIT, BSIS, each by year, then letter.
+  expect(rowOrder()).toEqual(["cs-1a", "cs-1b", "cs-2a", "it-1a", "is-1a"]);
+  await userEvent.click(screen.getByText("Generation order"));
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Go by" }), "year");
+  expect(rowOrder()).toEqual(["cs-1a", "cs-1b", "it-1a", "is-1a", "cs-2a"]);
   const programs = within(screen.getByRole("combobox", { name: "Program" })).getAllByRole("option").map((option) => option.textContent);
   expect(programs.filter((text) => text?.startsWith("BS"))).toEqual(["BSCS", "BSIT", "BSIS"]);
 });
@@ -1201,4 +1205,45 @@ it("explains that a discarded half follows its locked partner, and regenerating 
   expect(screen.getByText(/BSCS 1-B is approved and locked, so generating BSCS 1-A alone keeps the lecture sessions and lab times BSCS 1-B already has\./)).toBeInTheDocument();
   expect(screen.getByText(/\(unlock BSCS 1-B first\)/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Regenerate pair (A+B)" })).toBeDisabled();
+});
+
+it("shows where the paired Block takes the subject while placing a class in a proposal", async () => {
+  await editProposalBesideApprovedPartner();
+  // The dialog may close after applying; open the class again to read it.
+  if (!screen.queryByRole("dialog")) await userEvent.click(gridEntry(/^Edit CS101/));
+  const reference = within(screen.getByRole("region", { name: "BSCS 1-B schedule for CS101" }));
+  expect(reference.getByText("BSCS 1-B (approved) takes CS101:")).toBeInTheDocument();
+  expect(reference.getByText("MW · 08:00–09:30 · LB 483 · A. Rivera")).toBeInTheDocument();
+});
+
+it("unlocks every ticked locked Block with Unlock selected", async () => {
+  const approvedTwo: Schedule = {
+    ...emptyMaster,
+    assignments: [
+      acceptedBlockOne,
+      { ...acceptedBlockOne, record_id: "record-2", class_id: "class-block-2", offering_id: "offering-block-2", block_id: "block-2", subject_code: "CS102" },
+    ],
+  };
+  vi.mocked(api.getMasterSchedule).mockResolvedValue(approvedTwo);
+  vi.mocked(api.unlockBlock)
+    .mockResolvedValueOnce({ schedule: { ...approvedTwo, unlocked_block_ids: ["block-1"] }, validation: cleanValidation })
+    .mockResolvedValueOnce({ schedule: { ...approvedTwo, unlocked_block_ids: ["block-1", "block-2"] }, validation: cleanValidation });
+  renderPage();
+
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select BSCS 1-A" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Select BSCS 2-B" }));
+  await userEvent.click(screen.getByRole("button", { name: "Unlock selected (2)" }));
+
+  expect(vi.mocked(api.unlockBlock).mock.calls).toEqual([["master-1", "block-1"], ["master-1", "block-2"]]);
+  expect(await screen.findByText(/2 Blocks are unlocked\./)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Unlock selected/ })).not.toBeInTheDocument();
+});
+
+it("makes Generation order look and work like a button", async () => {
+  vi.mocked(api.listBlocks).mockResolvedValue({ items: [blocks[0], { ...blocks[1], program_code: "BSIT", name: "BSIT 2-B" }] });
+  renderPage();
+  const toggle = (await screen.findByText("Generation order")).closest("summary") as HTMLElement;
+  expect(toggle).toHaveClass("border", "rounded-lg");
+  await userEvent.click(toggle);
+  expect(screen.getByRole("combobox", { name: "Go by" })).toBeVisible();
 });

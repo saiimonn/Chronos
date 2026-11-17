@@ -7,6 +7,7 @@ import { publishTermChanged } from "../state/appEvents";
 import CommitteeTimetablePage, {
   DEFAULT_ROOM_CODE,
   MIN_CARD_WIDTH_PX,
+  computeDayPositions,
   formatScheduleDate,
 } from "./CommitteeTimetablePage";
 
@@ -1724,4 +1725,34 @@ it("scrolls a card into view on keyboard focus only", async () => {
 
   fireEvent.focus(card, { relatedTarget: document.body });
   expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+});
+
+it("draws a joint class shared by several Blocks as one card naming each Block", () => {
+  const [lecture, other] = mockProjection.assignments;
+  const jointB = { ...lecture, record_id: "rec-1b", block_id: "block-1b", block_name: "BSCS-1B" };
+  const positioned = computeDayPositions([lecture, jointB, other], new Map([["rec-1b", "Room double-booked"]]));
+  expect(positioned).toHaveLength(2);
+  const card = positioned.find((item) => item.assignment.subject_code === "CS101");
+  expect(card?.blockNames).toEqual(["BSCS-1A", "BSCS-1B"]);
+  expect(card?.conflictReason).toBe("Room double-booked");
+  // Both Blocks share one card, so the day stays one column wide.
+  expect(card?.totalCols).toBe(1);
+});
+
+it("renders one card listing both Blocks for a joint class", async () => {
+  const lecture = { ...mockProjection.assignments[0], room_code: "LB442", meeting_days: "M" };
+  vi.mocked(api.getTimetableProjection).mockResolvedValue({
+    ...mockProjection,
+    assignments: [lecture, { ...lecture, record_id: "rec-1b", block_id: "block-1b", block_name: "BSCS-1B" }],
+  });
+  render(
+    <MemoryRouter>
+      <CommitteeTimetablePage />
+    </MemoryRouter>,
+  );
+  const cards = await screen.findAllByRole("article", { name: /^CS101 G1/ });
+  expect(cards).toHaveLength(1);
+  expect(cards[0].getAttribute("aria-label")).toContain("Blocks BSCS-1A and BSCS-1B");
+  expect(within(cards[0]).getByText("BSCS-1A")).toBeInTheDocument();
+  expect(within(cards[0]).getByText("BSCS-1B")).toBeInTheDocument();
 });

@@ -160,6 +160,8 @@ export function formatScheduleDate(isoString: string): string {
 
 interface PositionedAssignment {
   assignment: TimetableAssignment;
+  /** Every Block in this card: more than one for a joint class. */
+  blockNames: string[];
   startMinutes: number;
   endMinutes: number;
   startRow: number;
@@ -178,8 +180,24 @@ export function computeDayPositions(
 ): PositionedAssignment[] {
   if (assignments.length === 0) return [];
 
+  // A joint class (one subject group, teacher, room and time shared by
+  // several Blocks) is one meeting, so it is drawn as one card naming every
+  // Block instead of a card per Block.
+  const joint = new Map<string, { assignment: TimetableAssignment; blockNames: string[]; conflictReason?: string }>();
+  for (const a of assignments) {
+    const key = [a.subject_code, a.group_label, a.faculty_id, a.room_code ?? "", a.start_time, a.end_time].join("|");
+    const reason = conflictsByAssignment.get(a.record_id);
+    const found = joint.get(key);
+    if (found) {
+      if (!found.blockNames.includes(a.block_name)) found.blockNames.push(a.block_name);
+      found.conflictReason ??= reason;
+    } else {
+      joint.set(key, { assignment: a, blockNames: [a.block_name], conflictReason: reason });
+    }
+  }
+
   // Sort by start time, then duration descending
-  const sorted = [...assignments].sort((a, b) => {
+  const sorted = [...joint.values()].sort(({ assignment: a }, { assignment: b }) => {
     const aStart = parseTimeToMinutes(a.start_time);
     const bStart = parseTimeToMinutes(b.start_time);
     if (aStart !== bStart) return aStart - bStart;
@@ -188,15 +206,15 @@ export function computeDayPositions(
     return bDur - aDur;
   });
 
-  const parsed = sorted.map((a) => {
+  const parsed = sorted.map(({ assignment: a, blockNames, conflictReason }) => {
     const startMinutes = parseTimeToMinutes(a.start_time);
     const endMinutes = parseTimeToMinutes(a.end_time);
     const startRow = Math.max(0, Math.floor((startMinutes - calendarStart) / calendarInterval));
     const endRow = Math.min(calendarTotalSlots, Math.ceil((endMinutes - calendarStart) / calendarInterval));
     const spanRows = Math.max(1, endRow - startRow);
-    const conflictReason = conflictsByAssignment.get(a.record_id);
     return {
       assignment: a,
+      blockNames,
       startMinutes,
       endMinutes,
       startRow,
@@ -1186,9 +1204,9 @@ export default function CommitteeTimetablePage() {
                                   }
                                 }}
                                 role="article"
-                                aria-label={`${item.assignment.group_label} (${item.assignment.subject_title}), Block ${
-                                  item.assignment.block_name
-                                }, Faculty ${item.assignment.faculty_name}, Room ${
+                                aria-label={`${item.assignment.group_label} (${item.assignment.subject_title}), ${
+                                  item.blockNames.length > 1 ? "Blocks" : "Block"
+                                } ${item.blockNames.join(" and ")}, Faculty ${item.assignment.faculty_name}, Room ${
                                   item.assignment.room_code || "unassigned"
                                 }, ${item.assignment.start_time.slice(0, 5)} to ${item.assignment.end_time.slice(0, 5)}${
                                   hasConflict ? `, Conflict: ${item.conflictReason}` : ""
@@ -1204,9 +1222,9 @@ export default function CommitteeTimetablePage() {
                                     ? "border-2 border-error bg-error-container/90 text-on-error-container ring-1 ring-error/30"
                                     : "border border-primary/30 bg-surface-container-high hover:border-primary text-on-surface"
                                 }`}
-                                title={`${item.assignment.group_label}: ${item.assignment.subject_title}\nBlock: ${
-                                  item.assignment.block_name
-                                }\nFaculty: ${item.assignment.faculty_name}\nRoom: ${
+                                title={`${item.assignment.group_label}: ${item.assignment.subject_title}\n${
+                                  item.blockNames.length > 1 ? "Blocks" : "Block"
+                                }: ${item.blockNames.join(", ")}\nFaculty: ${item.assignment.faculty_name}\nRoom: ${
                                   item.assignment.room_code ?? "TBD"
                                 }\nTime: ${item.assignment.start_time.slice(0, 5)} - ${item.assignment.end_time.slice(
                                   0,
@@ -1234,11 +1252,15 @@ export default function CommitteeTimetablePage() {
                                   </div>
 
                                   {/* Block & Room */}
-                                  <div className="flex items-center justify-between gap-1 text-xs font-semibold text-on-surface pt-0.5">
-                                    <span className="truncate bg-surface-container px-1 py-0.2 rounded">
-                                      {item.assignment.block_name}
+                                  <div className="flex items-start justify-between gap-1 text-xs font-semibold text-on-surface pt-0.5">
+                                    <span className="flex flex-wrap gap-0.5 min-w-0">
+                                      {item.blockNames.map((name) => (
+                                        <span key={name} className="truncate bg-surface-container px-1 py-0.2 rounded">
+                                          {name}
+                                        </span>
+                                      ))}
                                     </span>
-                                    <span className="truncate text-primary">
+                                    <span className="truncate text-primary shrink-0">
                                       {item.assignment.room_code || "No Room"}
                                     </span>
                                   </div>

@@ -7,10 +7,12 @@ DCISM runs two semesters and a summer term:
   holds both weekly sessions back to back, so its meeting runs twice the
   subject's session length: 3h for a lecture, 5h for a lab.
 * Term 3 is the summer term. It packs the load into a short term, so every
-  class meets Monday to Thursday (``MTWTh``) at the normal session length.
+  class meets Monday to Thursday (``MTWTh``) at the normal session length. The
+  only other pattern a class may be given there, by hand, is Friday-only
+  (``F``), held back to back as in a semester.
 
-* A class may also meet Friday-Saturday (``FSa``) or on a single weekend day
-  (``Sa`` or ``Su``), in any term. The class editor sets these by hand; in a
+* In a semester a class may also meet Friday-Saturday (``FSa``) or on a single
+  weekend day (``Sa`` or ``Su``). The class editor sets these by hand; in a
   semester the GA draws one only for a subject that prefers it. Sunday is not
   a class day: it is only a placeholder for the practicum (OJT) schedule.
 * Saturday-only (``Sa``) is held like Friday-only: both weekly sessions back
@@ -33,6 +35,8 @@ SUMMER_TERM_NUMBER = 3
 
 SEMESTER_MEETING_PATTERNS: tuple[str, ...] = ("MW", "TTh", "F")
 SUMMER_MEETING_PATTERNS: tuple[str, ...] = ("MTWTh",)
+# The one pattern a summer class may be set to by hand besides MTWTh.
+SUMMER_MANUAL_PATTERNS: tuple[str, ...] = ("F",)
 # Weekend meetings (Su is the practicum/OJT placeholder): accepted on a manual
 # edit in every term; the GA draws one only for a subject that prefers it.
 WEEKEND_MEETING_PATTERNS: tuple[str, ...] = ("FSa", "Sa", "Su")
@@ -87,8 +91,10 @@ def generated_meeting_patterns(term_number: int) -> tuple[str, ...]:
 
 
 def allowed_meeting_patterns(term_number: int) -> tuple[str, ...]:
-    """Every pattern a class in this term may meet on, including weekend
-    meetings set by hand."""
+    """Every pattern a class in this term may meet on, including those set
+    by hand: weekend meetings in a semester, Friday-only in the summer."""
+    if is_summer_term(term_number):
+        return SUMMER_MEETING_PATTERNS + SUMMER_MANUAL_PATTERNS
     return generated_meeting_patterns(term_number) + WEEKEND_MEETING_PATTERNS
 
 

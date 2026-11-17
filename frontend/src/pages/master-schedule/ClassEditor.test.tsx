@@ -96,6 +96,14 @@ it("packs a summer-term class into MTWTh", async () => {
   expect(screen.getByText(/Pattern: MTWTh/)).toBeInTheDocument();
 });
 
+it("allows only MTWTh or Friday in the summer term, never a weekend pattern", async () => {
+  renderEditor("", { termNumber: 3 });
+  await userEvent.click(screen.getByRole("checkbox", { name: "Friday" }));
+  expect(screen.getByText(/Pattern: F\b/)).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "Saturday" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "Sunday" })).toBeDisabled();
+});
+
 it("splits a Friday-Saturday lecture into 1h30 each day", async () => {
   renderEditor("FSa");
   expect(screen.getByText(/Meets Friday, Saturday, 09:00-10:30: 1h 30m each day\./)).toBeInTheDocument();

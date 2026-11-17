@@ -186,10 +186,11 @@ def _codes(problem, candidate, *, strict=True) -> list[str]:
 
 
 def test_semesters_allow_mw_tth_f_and_summer_allows_mtwth():
-    # FSa, Sa and Su (weekend) are allowed on edit in every term.
+    # FSa, Sa and Su (weekend) are allowed on edit in a semester.
     assert allowed_meeting_patterns(1) == ("MW", "TTh", "F", "FSa", "Sa", "Su")
     assert allowed_meeting_patterns(2) == ("MW", "TTh", "F", "FSa", "Sa", "Su")
-    assert allowed_meeting_patterns(3) == ("MTWTh", "FSa", "Sa", "Su")
+    # The summer term allows only Friday-only besides MTWTh, set by hand.
+    assert allowed_meeting_patterns(3) == ("MTWTh", "F")
 
 
 def test_the_ga_never_draws_a_weekend_pattern():
