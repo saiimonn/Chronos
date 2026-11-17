@@ -101,6 +101,25 @@ function partnerLetter(letter: string): string | null {
   return String.fromCharCode(65 + ((letter.charCodeAt(0) - 65) ^ 1));
 }
 
+/**
+ * A class of a proposal, placed or not: its subject and, when known, its
+ * Offering. An unplaced class appears only in the proposal's changes.
+ */
+function proposalClass(preview: BlockReplacementPreviewResponse | undefined, classId: string): { subject_code: string; offering_id?: string } | undefined {
+  if (!preview) return undefined;
+  const placed = preview.proposed_assignments.find((item) => item.class_id === classId);
+  if (placed) return placed;
+  const change = preview.changed_values.find((item) => item.class_id === classId);
+  return change ? { subject_code: change.subject_code, offering_id: change.current_assignment?.offering_id } : undefined;
+}
+
+/** Two classes attend one shared lecture: the same Offering, or the same subject when one Offering is unknown. */
+function sameLecture(a: { subject_code: string; offering_id?: string }, b: { subject_code: string; offering_id?: string }): boolean {
+  return a.offering_id !== undefined && b.offering_id !== undefined
+    ? a.offering_id === b.offering_id
+    : a.subject_code === b.subject_code;
+}
+
 function findPartner(block: BlockSection, blocks: BlockSection[]): BlockSection | null {
   const letter = partnerLetter(block.section_letter);
   if (!letter) return null;
@@ -639,13 +658,26 @@ export default function MasterSchedulePage() {
     const run = runsRef.current[blockId];
     const partnerRun = partnerId ? runsRef.current[partnerId] : undefined;
     if (!partnerId || !partnerRun?.preview || partnerRun.phase !== "review") return null;
-    const edited = run?.preview?.proposed_assignments.find((item) => item.class_id === classId);
+    const edited = proposalClass(run?.preview, classId);
     if (!edited) return null;
     const isLab = subjectsByCode.get(edited.subject_code)?.subject_type === "LAB";
     const target = partnerRun.preview.proposed_assignments.find((item) => (isLab
       ? item.subject_code === edited.subject_code
-      : edited.offering_id !== undefined && item.offering_id === edited.offering_id));
-    if (!target) return null;
+      : sameLecture(edited, item)));
+    if (!target) {
+      // The partner left the shared lecture unplaced: placing it here places
+      // it there too, as one session. A paired LAB is not placed this way,
+      // since its teacher and room are the partner's own to choose.
+      const unplaced = isLab ? undefined : partnerRun.preview.changed_values.find((item) => (
+        item.proposed_assignment == null && item.subject_code === edited.subject_code
+      ));
+      if (!unplaced) return null;
+      return {
+        blockId: partnerId,
+        classId: unplaced.class_id,
+        assignments: [...toPayload(partnerRun.preview), { class_id: unplaced.class_id, ...value }],
+      };
+    }
     const moved: ClassPlacement = isLab
       ? { faculty_id: target.faculty_id, room_code: target.room_code, meeting_days: value.meeting_days, time_slot_id: value.time_slot_id }
       : value;
@@ -665,12 +697,12 @@ export default function MasterSchedulePage() {
   function approvedPairedMove(blockId: string, classId: string, value: ClassPlacement) {
     const partnerId = rowsById.get(blockId)?.partner?.block_id;
     if (!partnerId || runsRef.current[partnerId]?.phase === "review") return null;
-    const edited = runsRef.current[blockId]?.preview?.proposed_assignments.find((item) => item.class_id === classId);
+    const edited = proposalClass(runsRef.current[blockId]?.preview, classId);
     if (!edited) return null;
     const isLab = subjectsByCode.get(edited.subject_code)?.subject_type === "LAB";
     const record = assignments.find((item) => item.block_id === partnerId && (isLab
       ? item.subject_code === edited.subject_code
-      : edited.offering_id !== undefined && item.offering_id === edited.offering_id));
+      : sameLecture(edited, item)));
     if (!record) return null;
     // A paired LAB shares only its days and time; its teacher and room differ by design.
     const update: AssignmentUpdate = isLab ? { meeting_days: value.meeting_days, time_slot_id: value.time_slot_id } : { ...value };
@@ -829,6 +861,10 @@ export default function MasterSchedulePage() {
     const accepted = assignments.filter((assignment) => assignment.block_id === block.block_id);
     const conflictCount = accepted.filter((assignment) => conflictsByClass.has(assignment.class_id)).length;
     const empty = classCounts.get(block.block_id) === 0;
+    // Classes of the Block with no approved placement (e.g. a shared lecture
+    // its partner never received). Unknown counts report none missing.
+    const classTotal = classCounts.get(block.block_id);
+    const missing = classTotal === undefined ? 0 : Math.max(0, classTotal - new Set(accepted.map((item) => item.class_id)).size);
     // Approved means locked: read-only until someone unlocks it.
     const unlocked = accepted.length > 0 && unlockedIds.has(block.block_id);
     const locked = accepted.length > 0 && !unlocked;
@@ -837,7 +873,7 @@ export default function MasterSchedulePage() {
     // no run in flight or waiting for review: never generated, discarded,
     // failed, or unlocked to be generated again.
     const generatable = !empty && !locked && !(run && HELD_PHASES.includes(run.phase));
-    return { block, accepted, conflictCount, empty, unlocked, locked, generatable, run, partner: findPartner(block, catalog.blocks) };
+    return { block, accepted, conflictCount, missing, empty, unlocked, locked, generatable, run, partner: findPartner(block, catalog.blocks) };
   });
   const rowsById = new Map(blockRows.map((row) => [row.block.block_id, row]));
   const selectedRow = rowsById.get(selectedBlockId) ?? null;
@@ -2363,8 +2399,9 @@ const SHORT_PHASE_LABEL: Partial<Record<RunPhase, string>> = {
   review: "Ready",
 };
 
-function statusFor(row: { run?: BlockRun; accepted: ScheduleAssignment[]; conflictCount: number; empty: boolean; unlocked?: boolean }): { label: string; short?: string; tone: BlockTone } {
+function statusFor(row: { run?: BlockRun; accepted: ScheduleAssignment[]; conflictCount: number; missing?: number; empty: boolean; unlocked?: boolean }): { label: string; short?: string; tone: BlockTone } {
   const { run, accepted, conflictCount, empty, unlocked } = row;
+  const missing = row.missing ?? 0;
   if (run && run.phase !== "rejected") {
     if (run.phase === "review" && run.preview && !runIsValid(run)) return { label: "Review · needs fixes", short: "Needs fixes", tone: "error" };
     const tone: BlockTone = run.phase === "failed" ? "error" : run.phase === "review" || run.phase === "approving" ? "review" : "progress";
@@ -2372,11 +2409,14 @@ function statusFor(row: { run?: BlockRun; accepted: ScheduleAssignment[]; confli
   }
   if (accepted.length > 0) {
     const errors = `${conflictCount} conflict error${conflictCount === 1 ? "" : "s"}`;
+    const unplaced = `${missing} ${missing === 1 ? "class" : "classes"} missing`;
     if (unlocked) {
-      return conflictCount > 0
-        ? { label: `Unlocked · ${errors}`, short: "Unlocked · errors", tone: "error" }
+      if (conflictCount > 0) return { label: `Unlocked · ${errors}`, short: "Unlocked · errors", tone: "error" };
+      return missing > 0
+        ? { label: `Unlocked · ${unplaced}`, short: `${missing} missing`, tone: "error" }
         : { label: "Unlocked · editing", short: "Unlocked", tone: "progress" };
     }
+    if (missing > 0 && conflictCount === 0) return { label: `Locked · ${unplaced}`, short: `${missing} missing`, tone: "error" };
     return conflictCount > 0
       ? { label: `Locked · ${errors}`, short: errors, tone: "error" }
       : { label: `Approved · locked · ${accepted.length} ${accepted.length === 1 ? "class" : "classes"}`, short: "Locked", tone: "done" };
