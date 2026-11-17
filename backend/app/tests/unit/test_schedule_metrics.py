@@ -59,7 +59,7 @@ def test_faculty_load_counts_units_once_per_offering():
 
     assert metrics.faculty.faculty_teaching == 1
     assert metrics.faculty.load.numerator == 6
-    assert metrics.faculty.mean_load_ratio == pytest.approx(6 / member.max_workload)
+    assert metrics.faculty.mean_load_ratio == pytest.approx(6 / problem.limits.max_workload(member))
     assert metrics.faculty.load_cv == 0
     assert metrics.faculty.overloaded == 0
     # Four teaching days (M, T, W, Th), one class each: no idle time.
