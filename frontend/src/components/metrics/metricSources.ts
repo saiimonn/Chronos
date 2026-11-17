@@ -70,13 +70,13 @@ export const METRIC_REFERENCES = {
     sources: ["schaerf1999", "burke2002", "lewis2008"],
   },
   roomUtilization: {
-    formula: "U = F × O; F = room-hours used ÷ room-hours available, O = seats filled ÷ seats offered while in use",
+    formula: "U = F × O; F = room-hours used ÷ room-hours available, O = seats filled ÷ seats offered while in use. Seats filled are estimated from Block capacity (20, or 25 expanded), since enrolment is not recorded",
     reference: "Observed in universities: often about 20–30%, as low as 20–40% (Beyrouthy et al.); UK sector 27% in 2003–04 (HEFCE)",
     evidence: "observed",
     sources: ["beyrouthy2009", "hefce2006"],
   },
   facultyLoad: {
-    formula: "Units assigned ÷ maximum units (full-time 24, part-time cap)",
+    formula: "Units assigned ÷ maximum units (full-time 24, part-time 17)",
     reference: "≤ 100% per member; 0 members overloaded (manuscript load rule BR-003)",
     evidence: "thesis",
     sources: [],
