@@ -21,6 +21,7 @@ from app.models.historical_import_batch import (
     HistoricalImportRejection,
 )
 from app.models.ga_configuration import GAConfiguration
+from app.models.hard_constraint_configuration import HardConstraintConfiguration
 from app.models.historical_snapshot import HistoricalRecord, HistoricalSnapshot
 from app.models.room import Room
 from app.models.rule_set import (
@@ -58,6 +59,7 @@ __all__ = [
     "HistoricalImportBatch",
     "HistoricalImportRejection",
     "GAConfiguration",
+    "HardConstraintConfiguration",
     "HistoricalRecord",
     "HistoricalSnapshot",
     "JobStatus",

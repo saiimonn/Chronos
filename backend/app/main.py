@@ -22,6 +22,7 @@ from app.api.routes_offerings import router as offerings_router
 from app.api.routes_readiness import router as readiness_router
 from app.api.routes_rule_sets import router as rule_sets_router
 from app.api.routes_ga_configuration import router as ga_configuration_router
+from app.api.routes_hard_constraints import router as hard_constraints_router
 from app.api.routes_schedules import router as schedules_router
 from app.api.routes_blocks import router as blocks_router
 from app.api.routes_terms import router as terms_router
@@ -189,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(rule_sets_router, prefix="/api/v1")
     app.include_router(historical_uploads_router, prefix="/api/v1")
     app.include_router(ga_configuration_router, prefix="/api/v1")
+    app.include_router(hard_constraints_router, prefix="/api/v1")
     app.include_router(schedules_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
 

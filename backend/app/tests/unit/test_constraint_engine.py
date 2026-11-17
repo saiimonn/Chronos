@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 
 from app.domain import (
+    ConstraintLimits,
     Assignment,
     BlockClassDTO,
     BlockGenerationContext,
@@ -1040,7 +1041,7 @@ def test_locked_teaching_load_counts_towards_workload():
     faculty = next(
         item for item in problem.faculty if item.faculty_id == candidate_assignment.faculty_id
     )
-    locked_units = faculty.max_workload
+    locked_units = problem.limits.max_workload(faculty)
     lock = LockedAssignment(
         class_id=UUID("00000000-0000-0000-0000-000000000099"),
         faculty_id=candidate_assignment.faculty_id,
@@ -1059,7 +1060,22 @@ def test_locked_teaching_load_counts_towards_workload():
     assert tuple(conflict.code for conflict in report.conflicts) == (
         ConflictCode.FACULTY_WORKLOAD_EXCEEDED,
     )
-    assert f"exceeds maximum {faculty.max_workload}" in report.conflicts[0].message
+    assert (
+        f"exceeds maximum {problem.limits.max_workload(faculty)}"
+        in report.conflicts[0].message
+    )
+
+
+def test_saved_workload_limit_replaces_the_standing_rule():
+    problem = replace(
+        _problem(), limits=ConstraintLimits(full_time_max_units=1, part_time_max_units=1)
+    )
+    candidate_assignment = _assignment(SECTION_1, meeting_days="M", time_slot_id=SLOT_1)
+
+    report = ConstraintEngine().evaluate(problem, (candidate_assignment,))
+
+    assert [c.code for c in report.conflicts] == [ConflictCode.FACULTY_WORKLOAD_EXCEEDED]
+    assert "exceeds maximum 1" in report.conflicts[0].message
 
 
 def test_locked_assignment_unknown_time_slot_raises():
