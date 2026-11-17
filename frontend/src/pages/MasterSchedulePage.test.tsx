@@ -1104,6 +1104,57 @@ it("moves an approved partner's shared lecture with a proposal edit, so one edit
   expect(screen.getByText(/BSCS 1-B's approved session moved with it/)).toBeInTheDocument();
 });
 
+it("places a shared lecture left unplaced in both halves of a pair on both at once", async () => {
+  SUBJECT_OF["block-4"] = "CS101";
+  vi.mocked(api.listBlocks).mockResolvedValue({ items: pairedBlocks });
+  succeedEveryRun();
+  const unplacedFor = (blockId: string) => {
+    const preview = previewFor(blockId);
+    preview.proposed_assignments = [];
+    preview.changed_values[0].proposed_assignment = null;
+    return preview;
+  };
+  vi.mocked(api.previewBlockReplacement).mockImplementation(async (_s, blockId) => unplacedFor(blockId));
+  renderPage();
+  await generateAll(2, 2);
+
+  await userEvent.click(screen.getAllByRole("button", { name: "Place it by hand" })[0]);
+  const dialog = within(screen.getByRole("dialog", { name: "Place class in proposal" }));
+  await userEvent.click(dialog.getByRole("combobox", { name: "Instructor" }));
+  await userEvent.click(dialog.getByRole("option", { name: /A\. Rivera/ }));
+  await userEvent.click(dialog.getByRole("combobox", { name: "Room" }));
+  await userEvent.click(dialog.getByRole("option", { name: /LB 483/ }));
+  await userEvent.click(dialog.getByRole("checkbox", { name: "Monday" }));
+  // Monday brings Wednesday with it (MW).
+  await userEvent.click(dialog.getByRole("combobox", { name: "Time window" }));
+  await userEvent.click(dialog.getByRole("option", { name: /LEC 08:00-09:30/ }));
+  await userEvent.click(dialog.getByRole("button", { name: "Apply to proposal" }));
+
+  const placement = { faculty_id: "faculty-1", room_code: "LB 483", meeting_days: "MW", time_slot_id: "slot-1" };
+  await waitFor(() => expect(api.previewBlockReplacement).toHaveBeenCalledWith("master-1", "block-4", {
+    assignments: [{ class_id: "class-block-4", ...placement }],
+    strict_class_ids: ["class-block-4"],
+  }));
+  expect(api.previewBlockReplacement).toHaveBeenCalledWith("master-1", "block-1", {
+    assignments: [{ class_id: "class-block-1", ...placement }],
+    strict_class_ids: ["class-block-1"],
+  });
+});
+
+it("flags an approved Block that is missing a class instead of showing it complete", async () => {
+  vi.mocked(api.getMasterSchedule).mockResolvedValue(masterWithBlockOne);
+  vi.mocked(api.listBlockClasses).mockImplementation(async (blockId) => ({
+    items: blockId === "block-1"
+      ? [{ class_id: "class-block-1" } as BlockClass, { class_id: "class-block-1-lec" } as BlockClass]
+      : [{ class_id: `class-${blockId}` } as BlockClass],
+  }));
+  renderPage();
+
+  // Class counts load after the first render.
+  expect((await screen.findAllByText(/1 class missing|1 missing/, undefined, { timeout: 5000 })).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Approved · locked · 1 class$/)).not.toBeInTheDocument();
+});
+
 it("puts the approved partner back when the proposal edit is refused", async () => {
   const dialog = await editProposalBesideApprovedPartner(true);
 

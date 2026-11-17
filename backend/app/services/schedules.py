@@ -1883,6 +1883,58 @@ def _refuse_conflicting_edit(
     )
 
 
+def _fill_missing_shared_peers(
+    db: Session,
+    schedule: Schedule,
+    problem: Any,
+    block_id: UUID,
+    block_class_ids: set[UUID],
+    assignments: Sequence[ReplacementAssignmentPayload],
+) -> list[ScheduleRecord]:
+    """Write each placed shared session onto approved peers that lack it.
+
+    Only a peer Block that already holds approved records is filled; one not
+    generated yet picks the session up as a shared placement when it is.
+    Existing peer records are never overwritten.
+    """
+    sections = {s.class_id: s for s in problem.classes}
+    slots = {s.time_slot_id: s for s in problem.time_slots}
+    others = [r for r in schedule.records if r.class_id not in block_class_ids]
+    recorded = {r.class_id for r in others}
+    approved_blocks = {
+        sections[r.class_id].block_id for r in others if r.class_id in sections
+    }
+    filled: list[ScheduleRecord] = []
+    for a in assignments:
+        offering_id = sections[a.class_id].offering_id
+        for peer in problem.classes:
+            if (
+                peer.offering_id != offering_id
+                or peer.block_id == block_id
+                or peer.class_id in recorded
+                or peer.block_id not in approved_blocks
+            ):
+                continue
+            record = ScheduleRecord(
+                schedule_id=schedule.schedule_id,
+                term_id=schedule.term_id,
+                faculty_id=a.faculty_id,
+                subject_code=peer.subject_code,
+                class_id=peer.class_id,
+                time_slot_id=a.time_slot_id,
+                room_code=a.room_code,
+                meeting_days=a.meeting_days,
+                time_slot=slots[a.time_slot_id].label,
+                is_historical=False,
+            )
+            db.add(record)
+            recorded.add(peer.class_id)
+            filled.append(record)
+    if filled:
+        db.flush()
+    return filled
+
+
 def confirm_block_replacement(
     db: Session,
     schedule_id: UUID,
@@ -1999,11 +2051,36 @@ def confirm_block_replacement(
             db.add(new_record)
         db.flush()
 
+        # 2b. A shared lecture is one session for every Block taking it, so
+        # an approved partner that has no record for it yet receives the
+        # placement too (placing it by hand on one Block used to leave the
+        # partner missing the subject while it still looked complete).
+        filled = _fill_missing_shared_peers(
+            db, schedule, problem, block_id, block_class_ids, assignments_to_apply
+        )
+
         # Expire records collection to ensure reload sees fresh state
         db.expire(schedule, ["records"])
 
         # 3. Validate new schedule state
         validation_result = _validate_candidate(problem, _to_candidate(schedule))
+        # A filled peer that would clash where it lands is taken back out:
+        # the partner keeps its missing class rather than gain a conflict.
+        clashing = {
+            cid
+            for conflict in validation_result.constraint_report.conflicts
+            for cid in conflict.class_ids
+        }
+        dropped = [record for record in filled if record.class_id in clashing]
+        if dropped:
+            for record in dropped:
+                db.delete(record)
+            db.flush()
+            db.expire(schedule, ["records"])
+            filled = [record for record in filled if record not in dropped]
+            validation_result = _validate_candidate(
+                problem, _to_candidate(schedule)
+            )
         _require_teaching_days(validation_result, block_class_ids)
         unavailable = next(
             (
@@ -2041,6 +2118,7 @@ def confirm_block_replacement(
                 "block_id": block_id,
                 "before": replaced,
                 "after": [_audit_assignment(a) for a in assignments_to_apply],
+                "shared_sessions_filled": [_audit_assignment(r) for r in filled],
             },
         )
         savepoint.commit()
