@@ -4,7 +4,38 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ApiError, api, type Schedule, type TimetableProjection } from "../api/client";
 import { publishTermChanged } from "../state/appEvents";
-import CommitteeTimetablePage, { MIN_CARD_WIDTH_PX } from "./CommitteeTimetablePage";
+import CommitteeTimetablePage, {
+  DEFAULT_ROOM_CODE,
+  MIN_CARD_WIDTH_PX,
+  formatScheduleDate,
+} from "./CommitteeTimetablePage";
+
+type User = ReturnType<typeof userEvent.setup>;
+type ViewName = "Block" | "Room" | "Faculty";
+
+// An option's accessible name is its label followed by its description.
+function startsWith(prefix: string) {
+  return (name: string) => name.startsWith(prefix);
+}
+
+// Opens a SearchSelect combobox and clicks the option whose name starts with `optionPrefix`.
+async function pick(user: User, comboboxName: string, optionPrefix: string) {
+  await user.click(screen.getByRole("combobox", { name: comboboxName }));
+  await user.click(screen.getByRole("option", { name: startsWith(optionPrefix) }));
+}
+
+// The closed combobox shows "label — description".
+function currentValue(comboboxName: string): string {
+  return (screen.getByRole("combobox", { name: comboboxName }) as HTMLInputElement).value;
+}
+
+async function showView(user: User, view: ViewName) {
+  await user.click(screen.getByRole("button", { name: `${view} view` }));
+}
+
+function candidateLabel(createdAt: string) {
+  return `Routine Candidate — ${formatScheduleDate(createdAt)}`;
+}
 
 vi.mock("../api/client", async (importOriginal) => {
   const original = await importOriginal<typeof import("../api/client")>();
@@ -264,12 +295,36 @@ it("defaults schedule selector to the newest candidate schedule", async () => {
     </MemoryRouter>,
   );
 
-  const select = (await screen.findByLabelText("Select Schedule")) as HTMLSelectElement;
+  await screen.findByRole("combobox", { name: "Schedule" });
   // sched-candidate-2 was created 2026-09-08T10:00:00Z (the newest)
-  expect(select.value).toBe("sched-candidate-2");
+  expect(currentValue("Schedule")).toBe(`${candidateLabel(mockSchedules[0].created_at)} — [Candidate]`);
   expect(screen.getByLabelText("Candidate schedule")).toBeInTheDocument();
-  // 16px below md so iOS does not zoom on focus.
-  expect(select).toHaveClass("text-base", "md:text-sm");
+
+  // The timetable opens on Room view and the default room.
+  expect(DEFAULT_ROOM_CODE).toBe("LB442");
+  expect(screen.getByRole("button", { name: "Room view" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Block view" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Faculty view" })).toHaveAttribute("aria-pressed", "false");
+  expect(currentValue("Room")).toBe("LB442 — LAB");
+  expect(screen.getByText("Room LB442")).toBeInTheDocument();
+  expect(screen.getByText(/Showing:/)).toBeInTheDocument();
+});
+
+it("falls back to the first room when the default room is not in the catalog", async () => {
+  vi.mocked(api.listRooms).mockResolvedValue({ items: [mockRooms[0]] });
+  render(
+    <MemoryRouter>
+      <CommitteeTimetablePage />
+    </MemoryRouter>,
+  );
+
+  await screen.findByRole("combobox", { name: "Room" });
+  expect(currentValue("Room")).toBe("LB441 — LEC");
+  expect(api.getTimetableProjection).toHaveBeenCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: "LB441",
+    facultyId: undefined,
+  });
 });
 
 it("badges finalized schedules with lock icon and accessible text when selected", async () => {
@@ -289,10 +344,12 @@ it("badges finalized schedules with lock icon and accessible text when selected"
   );
 
   const user = userEvent.setup();
-  const select = await screen.findByLabelText("Select Schedule");
-  await user.selectOptions(select, "sched-master-1");
+  await screen.findByRole("combobox", { name: "Schedule" });
+  await pick(user, "Schedule", "Master Schedule");
 
   expect(await screen.findByLabelText("Finalized read-only schedule")).toBeInTheDocument();
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-master-1", "term-1", expect.anything());
+  expect(currentValue("Schedule")).toMatch(/^Master Schedule — .* — \[Finalized\]$/);
   expect(screen.getByText("Finalized (Read-only)")).toBeInTheDocument();
 });
 
@@ -326,7 +383,7 @@ it("renders assignments across Monday-Saturday columns spanning their scheduled 
   expect(screen.getAllByText("07:30-09:00").length).toBeGreaterThan(0);
 });
 
-it("filters timetable assignments by Block and clears the filter", async () => {
+it("shows one Block at a time in Block view and switches to another Block", async () => {
   render(
     <MemoryRouter>
       <CommitteeTimetablePage />
@@ -334,33 +391,39 @@ it("filters timetable assignments by Block and clears the filter", async () => {
   );
 
   const user = userEvent.setup();
-  const blockFilter = await screen.findByLabelText("Filter by Block");
+  await screen.findByRole("combobox", { name: "Room" });
 
-  // Filter by block-1
+  // Block view opens on the first Block and sends only its id.
   vi.mocked(api.getTimetableProjection).mockResolvedValueOnce({
     ...mockProjection,
     assignments: [mockProjection.assignments[0]], // only CS101 for block-1
   });
+  await showView(user, "Block");
+  expect(screen.getByRole("button", { name: "Block view" })).toHaveAttribute("aria-pressed", "true");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: "block-1",
+    roomCode: undefined,
+    facultyId: undefined,
+  });
+  expect(await screen.findByRole("combobox", { name: "Block" })).toHaveValue("BSCS-1A");
+  expect(screen.queryByRole("combobox", { name: "Room" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Clear filter" })).not.toBeInTheDocument();
 
-  await user.selectOptions(blockFilter, "block-1");
+  // Option labels carry no "Block: " prefix.
+  await user.click(screen.getByRole("combobox", { name: "Block" }));
+  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["BSCS-1A", "BSCS-2A"]);
+  await user.click(screen.getByRole("option", { name: "BSCS-2A" }));
 
-  expect(api.getTimetableProjection).toHaveBeenCalledWith(
-    "sched-candidate-2",
-    "term-1",
-    expect.objectContaining({ blockId: "block-1" }),
-  );
-
-  // Clear filter button appears
-  const clearBtn = await screen.findByRole("button", { name: "Clear filter" });
-  expect(clearBtn).toBeInTheDocument();
-
-  // Clicking clear resets both filters
-  await user.click(clearBtn);
-  expect((screen.getByLabelText("Filter by Block") as HTMLSelectElement).value).toBe("");
-  expect((screen.getByLabelText("Filter by Room") as HTMLSelectElement).value).toBe("");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: "block-2",
+    roomCode: undefined,
+    facultyId: undefined,
+  });
+  expect(await screen.findByText("Block BSCS-2A")).toBeInTheDocument();
+  expect(currentValue("Block")).toBe("BSCS-2A");
 });
 
-it("filters timetable assignments by Room and clears the filter", async () => {
+it("shows one room at a time in Room view and switching views sends only that view's selection", async () => {
   render(
     <MemoryRouter>
       <CommitteeTimetablePage />
@@ -368,24 +431,42 @@ it("filters timetable assignments by Room and clears the filter", async () => {
   );
 
   const user = userEvent.setup();
-  const roomFilter = await screen.findByLabelText("Filter by Room");
+  await screen.findByRole("combobox", { name: "Room" });
 
   vi.mocked(api.getTimetableProjection).mockResolvedValueOnce({
     ...mockProjection,
-    assignments: [mockProjection.assignments[1]], // only CS102 for LB442
+    assignments: [mockProjection.assignments[0]], // only CS101 for LB441
   });
 
-  await user.selectOptions(roomFilter, "LB442");
+  // Room options: label is the room code, description is the room type.
+  await user.click(screen.getByRole("combobox", { name: "Room" }));
+  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["LB441LEC", "LB442LAB"]);
+  await user.click(screen.getByRole("option", { name: startsWith("LB441") }));
 
-  expect(api.getTimetableProjection).toHaveBeenCalledWith(
-    "sched-candidate-2",
-    "term-1",
-    expect.objectContaining({ roomCode: "LB442" }),
-  );
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: "LB441",
+    facultyId: undefined,
+  });
+  expect(await screen.findByText("Room LB441")).toBeInTheDocument();
+  expect(currentValue("Room")).toBe("LB441 — LEC");
 
-  const clearBtn = await screen.findByRole("button", { name: "Clear filter" });
-  await user.click(clearBtn);
-  expect((screen.getByLabelText("Filter by Room") as HTMLSelectElement).value).toBe("");
+  // There is no "all" state: another view sends only its own selection.
+  await showView(user, "Faculty");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: undefined,
+    facultyId: "fac-1",
+  });
+
+  // Coming back keeps the room picked before.
+  await showView(user, "Room");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: "LB441",
+    facultyId: undefined,
+  });
+  expect(await screen.findByRole("combobox", { name: "Room" })).toHaveValue("LB441 — LEC");
 });
 
 it("offers an inactive teacher in the Faculty filter only while the shown schedule assigns them", async () => {
@@ -411,13 +492,20 @@ it("offers an inactive teacher in the Faculty filter only while the shown schedu
     </MemoryRouter>,
   );
 
-  const facultyFilter = await screen.findByLabelText("Filter by Faculty");
+  const user = userEvent.setup();
+  await screen.findByRole("combobox", { name: "Room" });
   expect(api.listFaculty).toHaveBeenCalledWith(true);
-  expect(within(facultyFilter).getByRole("option", { name: "Faculty: Grace Retired" })).toBeInTheDocument();
-  expect(within(facultyFilter).queryByRole("option", { name: "Faculty: Old Nobody" })).not.toBeInTheDocument();
+  await showView(user, "Faculty");
+  await user.click(await screen.findByRole("combobox", { name: "Faculty" }));
+
+  expect(screen.getByRole("option", { name: startsWith("Grace Retired") })).toHaveTextContent("Inactive");
+  expect(screen.getByRole("option", { name: startsWith("Ada Lovelace") })).not.toHaveTextContent("Inactive");
+  expect(screen.queryByRole("option", { name: startsWith("Old Nobody") })).not.toBeInTheDocument();
 });
 
-it("filters by Faculty and clears the filter", async () => {
+it("shows one member at a time in Faculty view, opening on the first active member", async () => {
+  const retiredFirst = { ...mockFaculty[1], faculty_id: "fac-0", full_name: "Aaron Retired", is_active: false };
+  vi.mocked(api.listFaculty).mockResolvedValue({ items: [retiredFirst, ...mockFaculty] });
   render(
     <MemoryRouter>
       <CommitteeTimetablePage />
@@ -425,22 +513,28 @@ it("filters by Faculty and clears the filter", async () => {
   );
 
   const user = userEvent.setup();
-  const facultyFilter = await screen.findByLabelText("Filter by Faculty");
-  expect(within(facultyFilter).getByRole("option", { name: "Faculty: Alan Turing" })).toBeInTheDocument();
+  await screen.findByRole("combobox", { name: "Room" });
+  await showView(user, "Faculty");
 
-  await user.selectOptions(facultyFilter, "fac-2");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: undefined,
+    facultyId: "fac-1",
+  });
+  expect(await screen.findByRole("combobox", { name: "Faculty" })).toHaveValue("Ada Lovelace");
 
-  expect(api.getTimetableProjection).toHaveBeenLastCalledWith(
-    "sched-candidate-2",
-    "term-1",
-    expect.objectContaining({ facultyId: "fac-2", blockId: undefined, roomCode: undefined }),
-  );
+  await pick(user, "Faculty", "Alan Turing");
 
-  await user.click(await screen.findByRole("button", { name: "Clear filter" }));
-  expect((screen.getByLabelText("Filter by Faculty") as HTMLSelectElement).value).toBe("");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined,
+    roomCode: undefined,
+    facultyId: "fac-2",
+  });
+  expect(await screen.findByText("Faculty Alan Turing")).toBeInTheDocument();
+  expect(currentValue("Faculty")).toBe("Alan Turing");
 });
 
-it("shows filter-no-results state when a filter matches zero assignments", async () => {
+it("says no classes are scheduled when the shown Block has none", async () => {
   render(
     <MemoryRouter>
       <CommitteeTimetablePage />
@@ -448,19 +542,18 @@ it("shows filter-no-results state when a filter matches zero assignments", async
   );
 
   const user = userEvent.setup();
-  const blockFilter = await screen.findByLabelText("Filter by Block");
+  await screen.findByRole("combobox", { name: "Room" });
 
   vi.mocked(api.getTimetableProjection).mockResolvedValueOnce({
     ...mockProjection,
     assignments: [],
   });
 
-  await user.selectOptions(blockFilter, "block-1");
+  await showView(user, "Block");
 
-  expect(
-    await screen.findByText("No assignments match the selected filter."),
-  ).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Clear filter" }).length).toBeGreaterThanOrEqual(1);
+  expect(await screen.findByText("No classes scheduled for Block BSCS-1A.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Clear filter" })).not.toBeInTheDocument();
+  expect(screen.queryByText("This schedule contains no assignments yet.")).not.toBeInTheDocument();
 });
 
 it("flags conflicting assignments with accessible text and icons without relying solely on color", async () => {
@@ -632,7 +725,8 @@ it("does not say 'so far' on a finalized schedule that validates incomplete", as
     </MemoryRouter>,
   );
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("Select Schedule"), "sched-master-1");
+  await screen.findByRole("combobox", { name: "Schedule" });
+  await pick(user, "Schedule", "Master Schedule");
   expect(await screen.findByText("No conflict errors")).toBeInTheDocument();
   expect(screen.queryByText("No conflicts so far")).not.toBeInTheDocument();
 });
@@ -717,8 +811,14 @@ it("preserves conflict indicators on visible cards when filtering by block", asy
     assignments: [mockProjection.assignments[0]],
   });
 
-  const blockFilter = screen.getByLabelText("Filter by Block");
-  await user.selectOptions(blockFilter, "block-1");
+  await showView(user, "Block");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: "block-1",
+    roomCode: undefined,
+    facultyId: undefined,
+  });
+  expect(await screen.findAllByText("CS101 G1")).toHaveLength(3);
+  expect(screen.queryByText("CS102 G1")).not.toBeInTheDocument();
 
   // rec-1 is still visible and STILL has the conflict badge, even though rec-2 is filtered out
   const filteredConflict = await screen.findAllByTitle(/Room double-booked/);
@@ -785,9 +885,11 @@ it("fetches projection only once on initial mount", async () => {
 
   await screen.findByText("Monday");
   expect(api.getTimetableProjection).toHaveBeenCalledTimes(1);
+  // The page opens on Room view at the default room.
   expect(api.getTimetableProjection).toHaveBeenCalledWith("sched-candidate-2", "term-1", {
     blockId: undefined,
-    roomCode: undefined,
+    roomCode: DEFAULT_ROOM_CODE,
+    facultyId: undefined,
   });
 });
 
@@ -805,7 +907,7 @@ it("does not render empty or no-active-term states when an API error occurs", as
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "No active term selected" })).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "No schedules found for this term" })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Select Schedule")).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Schedule" })).not.toBeInTheDocument();
 });
 
 it("renders dynamic calendar hours and intervals from projection metadata", async () => {
@@ -832,9 +934,15 @@ it("renders dynamic calendar hours and intervals from projection metadata", asyn
 });
 
 it.each([
-  ["Filter by Block", "block-1"],
-  ["Filter by Room", "LB441"],
-])("clears %s and the old finalized timetable when the active term changes", async (filter, value) => {
+  {
+    view: "Block" as const, option: "BSCS-2A", fallback: "BSCS-1A",
+    scope: { blockId: "next-block", roomCode: undefined, facultyId: undefined },
+  },
+  {
+    view: "Room" as const, option: "LB441", fallback: "LB442 — LAB",
+    scope: { blockId: undefined, roomCode: "LB442", facultyId: undefined },
+  },
+])("resets the $view selection to the new term's default and drops the old finalized timetable when the active term changes", async ({ view, option, fallback, scope }) => {
   vi.mocked(api.listSchedules).mockResolvedValue({ items: [mockSchedules[2]] });
   vi.mocked(api.getTimetableProjection).mockResolvedValue({
     ...mockProjection,
@@ -844,10 +952,15 @@ it.each([
   });
   render(<MemoryRouter><CommitteeTimetablePage /></MemoryRouter>);
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText(filter), value);
+  await screen.findByRole("combobox", { name: "Room" });
+  if (view !== "Room") await showView(user, view);
+  await screen.findByRole("combobox", { name: view });
+  await pick(user, view, option);
   await screen.findByRole("button", { name: "Export CSV" });
 
-  const nextSchedule = { ...mockSchedules[0], schedule_id: "next-schedule", term_id: "term-2" };
+  const nextSchedule = {
+    ...mockSchedules[0], schedule_id: "next-schedule", term_id: "term-2", created_at: "2026-10-01T09:00:00Z",
+  };
   vi.mocked(api.getActiveTerm).mockResolvedValue({ ...mockTerm, term_id: "term-2", term_number: 2 });
   vi.mocked(api.listSchedules).mockResolvedValue({ items: [nextSchedule] });
   vi.mocked(api.listBlocks).mockResolvedValue({ items: [{ ...mockBlocks[0], block_id: "next-block", term_id: "term-2" }] });
@@ -856,10 +969,7 @@ it.each([
   vi.mocked(api.getTimetableProjection).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
 
   await act(async () => publishTermChanged());
-  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("next-schedule", "term-2", {
-    blockId: undefined,
-    roomCode: undefined,
-  });
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("next-schedule", "term-2", scope);
   expect(screen.queryByRole("region", { name: "Committee Timetable Grid" })).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Finalized read-only schedule")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
@@ -871,9 +981,8 @@ it.each([
     assignments: [{ ...mockProjection.assignments[1], block_id: "next-block", group_label: "NEXT G1" }],
   }));
   expect(await screen.findByLabelText("Candidate schedule")).toBeInTheDocument();
-  expect(screen.getByLabelText("Select Schedule")).toHaveValue("next-schedule");
-  expect(screen.getByLabelText("Filter by Block")).toHaveValue("");
-  expect(screen.getByLabelText("Filter by Room")).toHaveValue("");
+  expect(currentValue("Schedule")).toBe(`${candidateLabel(nextSchedule.created_at)} — [Candidate]`);
+  expect(currentValue(view)).toBe(fallback);
   expect(screen.getAllByText("NEXT G1")).toHaveLength(2);
   expect(screen.queryByText("CS101 G1")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
@@ -909,10 +1018,14 @@ it("reports a failed background projection refresh without displaying the old ti
   expect(screen.queryByText("This schedule contains no assignments yet.")).not.toBeInTheDocument();
 });
 
-it("does not restore the previous term's room filter after a failed transition is retried", async () => {
+it("does not restore the previous term's room after a failed transition is retried", async () => {
   render(<MemoryRouter><CommitteeTimetablePage /></MemoryRouter>);
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("Filter by Room"), "LB441");
+  await screen.findByRole("combobox", { name: "Room" });
+  await pick(user, "Room", "LB441");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-2", "term-1", {
+    blockId: undefined, roomCode: "LB441", facultyId: undefined,
+  });
   vi.mocked(api.getActiveTerm).mockResolvedValue({ ...mockTerm, term_id: "term-2", term_number: 2 });
   vi.mocked(api.listSchedules).mockResolvedValue({
     items: [{ ...mockSchedules[0], schedule_id: "next-schedule", term_id: "term-2" }],
@@ -923,40 +1036,49 @@ it("does not restore the previous term's room filter after a failed transition i
   expect(await screen.findByRole("alert")).toHaveTextContent("Try again.");
   await user.click(screen.getByRole("button", { name: "Retry" }));
 
-  await screen.findByLabelText("Filter by Room");
+  await screen.findByRole("combobox", { name: "Room" });
   expect(api.getTimetableProjection).toHaveBeenLastCalledWith("next-schedule", "term-2", {
     blockId: undefined,
-    roomCode: undefined,
+    roomCode: DEFAULT_ROOM_CODE,
+    facultyId: undefined,
   });
-  expect(screen.getByLabelText("Filter by Room")).toHaveValue("");
+  expect(currentValue("Room")).toBe("LB442 — LAB");
 });
 
 it.each([
-  ["Filter by Block", "block-1"],
-  ["Filter by Room", "LB441"],
-])("clears a removed %s before a background replacement projection arrives", async (filter, value) => {
+  {
+    view: "Block" as const, option: "BSCS-1A", fallback: "BSCS-2A",
+    scope: { blockId: "block-2", roomCode: undefined, facultyId: undefined },
+  },
+  {
+    view: "Room" as const, option: "LB441", fallback: "LB442 — LAB",
+    scope: { blockId: undefined, roomCode: "LB442", facultyId: undefined },
+  },
+])("falls back to the default when the selected $view is removed, before a background replacement projection arrives", async ({ view, option, fallback, scope }) => {
   vi.mocked(api.listSchedules).mockResolvedValue({ items: [mockSchedules[2]] });
   vi.mocked(api.getTimetableProjection).mockResolvedValue({
     ...mockProjection, schedule_id: "sched-master-1", finalization_state: "finalized",
   });
   render(<MemoryRouter><CommitteeTimetablePage /></MemoryRouter>);
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText(filter), value);
+  await screen.findByRole("combobox", { name: "Room" });
+  if (view !== "Room") await showView(user, view);
+  await screen.findByRole("combobox", { name: view });
+  await pick(user, view, option);
   await screen.findByRole("button", { name: "Export CSV" });
+  expect(currentValue(view)).not.toBe(fallback);
   vi.mocked(api.listBlocks).mockResolvedValue({ items: [mockBlocks[1]] });
   vi.mocked(api.listRooms).mockResolvedValue({ items: [mockRooms[1]] });
   let finish: (projection: TimetableProjection) => void = () => {};
   vi.mocked(api.getTimetableProjection).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
 
   await act(async () => window.dispatchEvent(new Event("focus")));
-  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-master-1", "term-1", {
-    blockId: undefined, roomCode: undefined,
-  });
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-master-1", "term-1", scope);
   expect(screen.queryByRole("region", { name: "Committee Timetable Grid" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
 
   await act(async () => finish({ ...mockProjection, schedule_id: "sched-master-1", finalization_state: "finalized" }));
-  expect(await screen.findByLabelText(filter)).toHaveValue("");
+  expect(await screen.findByRole("combobox", { name: view })).toHaveValue(fallback);
 });
 
 it("ignores an old pending projection after an explicit term switch", async () => {
@@ -967,8 +1089,9 @@ it("ignores an old pending projection after an explicit term switch", async () =
   await act(async () => window.dispatchEvent(new Event("focus")));
 
   vi.mocked(api.getActiveTerm).mockResolvedValue({ ...mockTerm, term_id: "term-2", term_number: 2 });
+  const nextCreatedAt = "2026-10-01T09:00:00Z";
   vi.mocked(api.listSchedules).mockResolvedValue({
-    items: [{ ...mockSchedules[0], schedule_id: "next-schedule", term_id: "term-2" }],
+    items: [{ ...mockSchedules[0], schedule_id: "next-schedule", term_id: "term-2", created_at: nextCreatedAt }],
   });
   vi.mocked(api.getTimetableProjection).mockResolvedValue({
     ...mockProjection, schedule_id: "next-schedule", term_id: "term-2",
@@ -976,7 +1099,8 @@ it("ignores an old pending projection after an explicit term switch", async () =
   });
 
   await act(async () => publishTermChanged());
-  expect(screen.getByLabelText("Select Schedule")).toHaveValue("next-schedule");
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("next-schedule", "term-2", expect.anything());
+  expect(currentValue("Schedule")).toBe(`${candidateLabel(nextCreatedAt)} — [Candidate]`);
   await act(async () => finishOld({ ...mockProjection, finalization_state: "finalized" }));
   expect(screen.getAllByText("NEXT G1")).toHaveLength(2);
   expect(screen.queryByText("CS101 G1")).not.toBeInTheDocument();
@@ -1017,7 +1141,8 @@ async function selectFinalizedMaster() {
     </MemoryRouter>,
   );
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("Select Schedule"), "sched-master-1");
+  await screen.findByRole("combobox", { name: "Schedule" });
+  await pick(user, "Schedule", "Master Schedule");
   await screen.findByLabelText("Finalized read-only schedule");
   return user;
 }
@@ -1033,19 +1158,24 @@ it("offers no export for a candidate schedule", async () => {
   expect(screen.queryByRole("button", { name: /Export CSV/ })).not.toBeInTheDocument();
 });
 
-it("exports the finalized schedule with the Faculty filter", async () => {
-  stubDownload();
+it("exports the finalized schedule for the member shown in Faculty view", async () => {
+  const download = stubDownload();
   vi.mocked(api.exportSchedule).mockResolvedValue({ blob: new Blob(["x"]), filename: "f.csv" });
 
   const user = await selectFinalizedMaster();
-  await user.selectOptions(screen.getByLabelText("Filter by Faculty"), "fac-1");
+  await showView(user, "Faculty");
+  await screen.findByRole("combobox", { name: "Faculty" });
+  await pick(user, "Faculty", "Alan Turing");
+  expect(await screen.findByRole("button", { name: "This faculty" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("export-scope")).toHaveTextContent("Faculty Alan Turing only");
   await user.click(await screen.findByRole("button", { name: /Export CSV/ }));
 
-  expect(api.exportSchedule).toHaveBeenCalledWith(
-    "sched-master-1",
-    "csv",
-    expect.objectContaining({ facultyId: "fac-1" }),
-  );
+  expect(api.exportSchedule).toHaveBeenCalledWith("sched-master-1", "csv", {
+    blockId: undefined,
+    roomCode: undefined,
+    facultyId: "fac-2",
+  });
+  download.restore();
 });
 
 it("downloads the finalized schedule in the chosen format", async () => {
@@ -1054,11 +1184,16 @@ it("downloads the finalized schedule in the chosen format", async () => {
   vi.mocked(api.exportSchedule).mockResolvedValue({ blob, filename: "chronos_2025-2026_term1_20261113-1430.xlsx" });
 
   const user = await selectFinalizedMaster();
+  const scope = screen.getByRole("group", { name: "Export scope" });
+  await user.click(within(scope).getByRole("button", { name: "Whole schedule" }));
+  expect(within(scope).getByRole("button", { name: "Whole schedule" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(scope).getByRole("button", { name: "This room" })).toHaveAttribute("aria-pressed", "false");
   await user.click(screen.getByRole("button", { name: /Export XLSX/ }));
 
   expect(api.exportSchedule).toHaveBeenCalledWith("sched-master-1", "xlsx", {
     blockId: undefined,
     roomCode: undefined,
+    facultyId: undefined,
   });
   expect(screen.getByTestId("export-scope")).toHaveTextContent("Whole schedule");
   expect(download.createObjectURL).toHaveBeenCalledWith(blob);
@@ -1135,36 +1270,66 @@ it("keeps a delayed export refusal off a schedule selected afterwards", async ()
 
   const user = await selectFinalizedMaster();
   await user.click(screen.getByRole("button", { name: /Export CSV/ }));
-  await user.selectOptions(screen.getByLabelText("Select Schedule"), "sched-candidate-2");
+  await pick(user, "Schedule", candidateLabel(mockSchedules[0].created_at));
   await act(async () => refuse(new ApiError(422, "EXPORT_NOT_ALLOWED", "The schedule has unresolved hard conflicts.")));
 
   expect(screen.queryByText("The schedule has unresolved hard conflicts.")).not.toBeInTheDocument();
   expect(api.exportSchedule).toHaveBeenCalledWith("sched-master-1", "csv", {
     blockId: undefined,
-    roomCode: undefined,
+    roomCode: DEFAULT_ROOM_CODE,
+    facultyId: undefined,
   });
 });
 
-it("exports only the Block or room the timetable is filtered to", async () => {
+it("exports only the Block or room the timetable shows, or the whole schedule on request", async () => {
   const download = stubDownload();
   vi.mocked(api.exportSchedule).mockResolvedValue({ blob: new Blob(["a"]), filename: "f.csv" });
 
   const user = await selectFinalizedMaster();
-  await user.selectOptions(screen.getByLabelText("Filter by Block"), "block-1");
+  // The default export follows the default Room view.
+  expect(screen.getByTestId("export-scope")).toHaveTextContent("Room LB442 only");
+  await user.click(screen.getByRole("button", { name: /Export PDF/ }));
+  expect(api.exportSchedule).toHaveBeenLastCalledWith("sched-master-1", "pdf", {
+    blockId: undefined,
+    roomCode: "LB442",
+    facultyId: undefined,
+  });
+
+  await showView(user, "Block");
+  await screen.findByRole("combobox", { name: "Block" });
+  expect(await screen.findByRole("button", { name: "This block" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByTestId("export-scope")).toHaveTextContent("Block BSCS-1A only");
   await user.click(screen.getByRole("button", { name: /Export CSV/ }));
   expect(api.exportSchedule).toHaveBeenLastCalledWith("sched-master-1", "csv", {
     blockId: "block-1",
     roomCode: undefined,
+    facultyId: undefined,
   });
 
-  await user.selectOptions(screen.getByLabelText("Filter by Room"), "LB441");
+  await showView(user, "Room");
+  await screen.findByRole("combobox", { name: "Room" });
+  await pick(user, "Room", "LB441");
+  expect(await screen.findByRole("button", { name: "This room" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByTestId("export-scope")).toHaveTextContent("Room LB441 only");
   await user.click(screen.getByRole("button", { name: /Export XLSX/ }));
   expect(api.exportSchedule).toHaveBeenLastCalledWith("sched-master-1", "xlsx", {
     blockId: undefined,
     roomCode: "LB441",
+    facultyId: undefined,
   });
+
+  await user.click(screen.getByRole("button", { name: "Whole schedule" }));
+  expect(screen.getByTestId("export-scope")).toHaveTextContent("Whole schedule");
+  await user.click(screen.getByRole("button", { name: /Export CSV/ }));
+  expect(api.exportSchedule).toHaveBeenLastCalledWith("sched-master-1", "csv", {
+    blockId: undefined,
+    roomCode: undefined,
+    facultyId: undefined,
+  });
+
+  // Back to the shown room.
+  await user.click(screen.getByRole("button", { name: "This room" }));
+  expect(screen.getByTestId("export-scope")).toHaveTextContent("Room LB441 only");
   download.restore();
 });
 
@@ -1186,8 +1351,11 @@ it("deletes the selected candidate only after confirmation, then reloads", async
   await user.click(within(dialog).getByRole("button", { name: "Delete candidate" }));
 
   expect(api.deleteSchedule).toHaveBeenCalledWith("sched-candidate-2");
-  const select = (await screen.findByLabelText("Select Schedule")) as HTMLSelectElement;
-  await vi.waitFor(() => expect(select.value).toBe("sched-candidate-1"));
+  await screen.findByRole("combobox", { name: "Schedule" });
+  await vi.waitFor(() =>
+    expect(currentValue("Schedule")).toBe(`${candidateLabel(mockSchedules[1].created_at)} — [Candidate]`),
+  );
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-candidate-1", "term-1", expect.anything());
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
@@ -1264,9 +1432,11 @@ it("closes the dialog when the selection moves to another schedule", async () =>
   await user.click(await screen.findByRole("button", { name: "Delete candidate" }));
   await screen.findByRole("dialog");
   // The modal is inert to the pointer, so change the selection as a background sync would.
-  const select = screen.getByLabelText("Select Schedule") as HTMLSelectElement;
   await act(async () => {
-    fireEvent.change(select, { target: { value: "sched-candidate-1" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Schedule" }));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("option", { name: startsWith(candidateLabel(mockSchedules[1].created_at)) }));
   });
 
   await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -1300,7 +1470,7 @@ it("offers a day switcher that shows one weekday at narrow widths and keeps ever
   expect(grid.getAttribute("style")).toContain("--tt-cols-mobile: 64px minmax(");
 });
 
-it("says when the chosen day has no classes, jumps to one that does, and resets the day when the filter changes", async () => {
+it("says when the chosen day has no classes, jumps to one that does, and resets the day when the view changes", async () => {
   const user = userEvent.setup();
   render(
     <MemoryRouter>
@@ -1315,7 +1485,8 @@ it("says when the chosen day has no classes, jumps to one that does, and resets 
   expect(screen.queryByText(/^No classes on/)).not.toBeInTheDocument();
 
   await user.click(within(switcher).getByRole("button", { name: /^Thursday/ }));
-  await user.selectOptions(screen.getByLabelText("Filter by Block"), "block-2");
+  expect(within(switcher).getByRole("button", { name: /^Thursday/ })).toHaveAttribute("aria-pressed", "true");
+  await showView(user, "Block");
   await vi.waitFor(() =>
     expect(within(screen.getByRole("group", { name: "Select day" })).getByRole("button", { name: /^Monday/ })).toHaveAttribute(
       "aria-pressed",
@@ -1397,7 +1568,9 @@ it("opens the schedule named by the export link instead of the newest candidate"
       <CommitteeTimetablePage />
     </MemoryRouter>,
   );
-  expect(((await screen.findByLabelText("Select Schedule")) as HTMLSelectElement).value).toBe("sched-master-1");
+  await screen.findByRole("combobox", { name: "Schedule" });
+  expect(currentValue("Schedule")).toMatch(/^Master Schedule — .* — \[Finalized\]$/);
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-master-1", "term-1", expect.anything());
   expect(screen.getByRole("button", { name: "Export PDF" })).toBeInTheDocument();
 });
 
@@ -1418,7 +1591,9 @@ it("keeps the requested schedule when the first projection load fails and is ret
     </MemoryRouter>,
   );
   await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
-  expect(((await screen.findByLabelText("Select Schedule")) as HTMLSelectElement).value).toBe("sched-master-1");
+  await screen.findByRole("combobox", { name: "Schedule" });
+  expect(currentValue("Schedule")).toMatch(/^Master Schedule — .* — \[Finalized\]$/);
+  expect(api.getTimetableProjection).toHaveBeenLastCalledWith("sched-master-1", "term-1", expect.anything());
 });
 
 it("keeps the first 07:30 label inside its row and lets faculty names wrap instead of truncate", async () => {
