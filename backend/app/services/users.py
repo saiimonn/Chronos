@@ -55,7 +55,8 @@ def create_user(db: Session, payload: UserCreate) -> AppUser:
 
 
 def update_user(db: Session, user_id: UUID, payload: UserUpdate) -> AppUser:
-    """Change a user's role or active state, never leaving zero active admins.
+    """Rename a user or change their role or active state, never leaving zero
+    active admins.
 
     Every writer locks all active administrator rows, in key order, before
     reading the target. A concurrent writer waits on those locks, then
@@ -91,6 +92,22 @@ def update_user(db: Session, user_id: UUID, payload: UserUpdate) -> AppUser:
             "LAST_ACTIVE_ADMINISTRATOR",
             "At least one active Department Administrator must remain.",
         )
+
+    if payload.username is not None and payload.username != user.username:
+        # Case-insensitive, as at creation: "Admin" may not shadow "admin".
+        if db.scalar(
+            select(AppUser.user_id).where(
+                func.lower(AppUser.username) == func.lower(payload.username),
+                AppUser.user_id != user.user_id,
+            )
+        ):
+            raise _duplicate_username(payload.username)
+        user.username = payload.username
+        try:
+            with db.begin_nested():
+                db.flush()
+        except IntegrityError as error:
+            raise _duplicate_username(payload.username) from error
 
     if user.is_active and not is_active:
         # A deactivated user's open sessions end now, not at their expiry.

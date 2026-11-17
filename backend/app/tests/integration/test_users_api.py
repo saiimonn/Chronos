@@ -291,7 +291,7 @@ def test_login_upgrades_an_outdated_password_hash(db_session: Session):
     assert not service_security.password_needs_rehash(user.password_hash)
 
 
-@pytest.mark.parametrize("body", [{"password": "a new long password"}, {"username": "renamed"}])
+@pytest.mark.parametrize("body", [{"password": "a new long password"}])
 def test_user_update_refuses_fields_it_cannot_change(db_session: Session, body: dict):
     client, _ = _admin_client(db_session)
     target = make_user(db_session, username="target")
@@ -299,5 +299,70 @@ def test_user_update_refuses_fields_it_cannot_change(db_session: Session, body: 
     response = client.patch(f"/api/v1/users/{target.user_id}", json=body)
 
     assert response.status_code == 422
+    db_session.refresh(target)
+    assert target.username == "target"
+
+
+def test_administrator_renames_a_user_who_then_logs_in_with_the_new_name(db_session: Session):
+    client, _ = _admin_client(db_session)
+    target = make_user(db_session, username="target")
+
+    response = client.patch(f"/api/v1/users/{target.user_id}", json={"username": "j.dela.cruz"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["username"] == "j.dela.cruz"
+    assert response.json()["role"] == SCHEDULER.value
+    login = make_client(db_session).post(
+        "/api/v1/auth/login", json={"username": "j.dela.cruz", "password": PASSWORD}
+    )
+    assert login.status_code == 200
+    old = make_client(db_session).post(
+        "/api/v1/auth/login", json={"username": "target", "password": PASSWORD}
+    )
+    assert old.status_code == 401
+
+
+@pytest.mark.parametrize("username", ["admin", "ADMIN"])
+def test_rename_to_a_taken_username_is_a_duplicate(db_session: Session, username: str):
+    client, _ = _admin_client(db_session)
+    target = make_user(db_session, username="target")
+
+    response = client.patch(f"/api/v1/users/{target.user_id}", json={"username": username})
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "DUPLICATE_RESOURCE"
+    db_session.refresh(target)
+    assert target.username == "target"
+
+
+def test_a_user_may_be_renamed_to_a_new_case_of_their_own_name(db_session: Session):
+    client, _ = _admin_client(db_session)
+    target = make_user(db_session, username="target")
+
+    response = client.patch(f"/api/v1/users/{target.user_id}", json={"username": "Target"})
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "Target"
+
+
+@pytest.mark.parametrize("username", ["", " padded", "zero\u200bwidth"])
+def test_rename_refuses_blank_padded_or_unprintable_names(db_session: Session, username: str):
+    client, _ = _admin_client(db_session)
+    target = make_user(db_session, username="target")
+
+    response = client.patch(f"/api/v1/users/{target.user_id}", json={"username": username})
+
+    assert response.status_code == 422
+    db_session.refresh(target)
+    assert target.username == "target"
+
+
+def test_a_committee_member_cannot_rename_anyone(db_session: Session):
+    client = make_api_client(db_session, role=SCHEDULER)
+    target = make_user(db_session, username="target")
+
+    response = client.patch(f"/api/v1/users/{target.user_id}", json={"username": "renamed"})
+
+    assert response.status_code == 403
     db_session.refresh(target)
     assert target.username == "target"

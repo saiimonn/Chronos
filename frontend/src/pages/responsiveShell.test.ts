@@ -40,7 +40,8 @@ it("keeps the roster table, availability footer and timetable controls inside a 
 
   const timetable = pages["./CommitteeTimetablePage.tsx"];
   expect(timetable).toContain('className="flex flex-wrap items-center gap-2" role="group" aria-label="Export schedule"');
-  expect(timetable.match(/<select[\s\S]*?className="max-w-full /g)).toHaveLength(4);
+  // The schedule and view pickers are searchable comboboxes that shrink to the panel.
+  expect(timetable.match(/<SearchSelect[\s\S]*?className="[^"]*max-w-full"/g)).toHaveLength(2);
 });
 
 // CHR-FE-018: the sidebar skip link targets #main-content, so every shell page must expose it as a main the skip link can target, focusable only during the jump.

@@ -34,7 +34,7 @@ function matches(option: SearchSelectOption, query: string): boolean {
 }
 
 const controlClass =
-  "w-full border border-outline-variant rounded-lg pl-9 pr-9 py-2.5 bg-surface-container-lowest outline-none focus:border-primary";
+  "w-full border border-outline-variant rounded-lg pl-9 pr-9 py-2.5 bg-surface-container-lowest outline-none focus:border-primary text-base md:text-sm";
 
 /**
  * A combobox with a filtered listbox popup, following the ARIA 1.2 pattern so

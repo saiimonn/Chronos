@@ -9,7 +9,6 @@ import {
   Filter,
   Lock,
   RefreshCw,
-  X,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -34,10 +33,51 @@ import {
   type TimetableProjection,
 } from "../api/client";
 import Modal from "../components/modals/Modal";
+import SearchSelect, { type SearchSelectOption } from "../components/forms/SearchSelect";
 import Sidebar from "../components/layout/Sidebar";
 import ScheduleEligibility, { ELIGIBILITY_STATUS_ID } from "../components/readiness/ScheduleEligibility";
 import TopBar from "../components/layout/TopBar";
 import { usePeriodicSync } from "../hooks/usePeriodicSync";
+
+export type TimetableView = "block" | "room" | "faculty";
+
+// The room the timetable opens on; the first room is used when it is missing.
+export const DEFAULT_ROOM_CODE = "LB442";
+
+const VIEW_LABEL: Record<TimetableView, string> = {
+  block: "Block",
+  room: "Room",
+  faculty: "Faculty",
+};
+
+function defaultRoomCode(rooms: Room[]): string {
+  return (
+    rooms.find((room) => room.room_code === DEFAULT_ROOM_CODE)?.room_code
+    ?? rooms.find((room) => room.is_active !== false)?.room_code
+    ?? rooms[0]?.room_code
+    ?? ""
+  );
+}
+
+function defaultBlockId(blocks: BlockSection[]): string {
+  return blocks[0]?.block_id ?? "";
+}
+
+function defaultFacultyId(members: Faculty[]): string {
+  return members.find((member) => member.is_active)?.faculty_id ?? "";
+}
+
+// Only the current view's selection narrows the projection or an export.
+function viewScope(
+  view: TimetableView,
+  selection: { blockId: string; roomCode: string; facultyId: string },
+): { blockId?: string; roomCode?: string; facultyId?: string } {
+  return {
+    blockId: view === "block" ? selection.blockId || undefined : undefined,
+    roomCode: view === "room" ? selection.roomCode || undefined : undefined,
+    facultyId: view === "faculty" ? selection.facultyId || undefined : undefined,
+  };
+}
 
 interface DayColumnDef {
   token: MeetingDayToken;
@@ -229,6 +269,9 @@ export default function CommitteeTimetablePage() {
   const [selectedBlockId, setSelectedBlockId] = useState<string>("");
   const [selectedRoomCode, setSelectedRoomCode] = useState<string>("");
   const [selectedFacultyId, setSelectedFacultyId] = useState<string>("");
+  const [view, setView] = useState<TimetableView>("room");
+  // Exports follow the current view unless the whole schedule is asked for.
+  const [exportWhole, setExportWhole] = useState(false);
   const [mobileDay, setMobileDay] = useState<{ token: MeetingDayToken; scope: string } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -283,12 +326,21 @@ export default function CommitteeTimetablePage() {
         const sortedSchedules = [...schedulesList.items].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
         );
+        // State keeps only the operator's own picks; a pick that is gone (or
+        // a new term) is dropped. Each view then shows its default, worked out
+        // here and at render from the lists, so filling a default never changes
+        // the sync's deps and triggers a second load.
         const blockId = !termChanged && blocksList.items.some((b) => b.block_id === selectedBlockId)
           ? selectedBlockId : "";
         const roomCode = !termChanged && roomsList.items.some((r) => r.room_code === selectedRoomCode)
           ? selectedRoomCode : "";
         const facultyId = !termChanged && facultyList.items.some((f) => f.faculty_id === selectedFacultyId)
           ? selectedFacultyId : "";
+        const shown = {
+          blockId: blockId || defaultBlockId(blocksList.items),
+          roomCode: roomCode || defaultRoomCode(roomsList.items),
+          facultyId: facultyId || defaultFacultyId(facultyList.items),
+        };
 
         if (sortedSchedules.length === 0) {
           lastPublishedTermIdRef.current = activeTerm.term_id;
@@ -328,11 +380,11 @@ export default function CommitteeTimetablePage() {
 
         // Fetch projection with current filter parameters and validation
         const [proj, val] = await Promise.all([
-          api.getTimetableProjection(targetScheduleId, activeTerm.term_id, {
-            blockId: blockId || undefined,
-            roomCode: roomCode || undefined,
-            facultyId: facultyId || undefined,
-          }),
+          api.getTimetableProjection(
+            targetScheduleId,
+            activeTerm.term_id,
+            viewScope(view, shown),
+          ),
           api.validateSchedule(targetScheduleId).catch(() => null),
         ]);
 
@@ -386,13 +438,13 @@ export default function CommitteeTimetablePage() {
         }
       }
     },
-    [selectedBlockId, selectedRoomCode, selectedFacultyId],
+    [selectedBlockId, selectedRoomCode, selectedFacultyId, view],
   );
 
   const { sync } = usePeriodicSync(syncData, {
     intervalMs: 5000,
     listenTermChanged: true,
-    deps: [selectedBlockId, selectedRoomCode, selectedFacultyId],
+    deps: [selectedBlockId, selectedRoomCode, selectedFacultyId, view],
   });
 
   const selectedSchedule = useMemo(
@@ -545,7 +597,10 @@ export default function CommitteeTimetablePage() {
   // Below md the grid shows the time column and one day, picked with the day
   // switcher; it opens on the first day that has classes.
   // A chosen day only holds for the same schedule, term and filter; any change falls back to the first day with classes.
-  const dayScope = `${term?.term_id}|${selectedScheduleId}|${selectedBlockId}|${selectedRoomCode}|${selectedFacultyId}`;
+  const shownBlockId = selectedBlockId || defaultBlockId(blocks);
+  const shownRoomCode = selectedRoomCode || defaultRoomCode(rooms);
+  const shownFacultyId = selectedFacultyId || defaultFacultyId(faculty);
+  const dayScope = `${term?.term_id}|${selectedScheduleId}|${view}|${shownBlockId}|${shownRoomCode}|${shownFacultyId}`;
   const firstDayWithClasses = timetableDays.find((d) => (assignmentsByDay.get(d.token) ?? []).length > 0);
   const activeDay =
     (mobileDay?.scope === dayScope ? mobileDay.token : undefined) ?? firstDayWithClasses?.token ?? timetableDays[0].token;
@@ -560,19 +615,47 @@ export default function CommitteeTimetablePage() {
   } as React.CSSProperties;
 
   const totalFilteredAssignments = projection?.assignments.length ?? 0;
-  const isFilterActive = Boolean(selectedBlockId || selectedRoomCode || selectedFacultyId);
-  const activeFilterLabel = selectedBlockId
-    ? `Block ${blocks.find((b) => b.block_id === selectedBlockId)?.name ?? selectedBlockId}`
-    : selectedRoomCode
-      ? `Room ${selectedRoomCode}`
-      : selectedFacultyId
-        ? `Faculty ${faculty.find((f) => f.faculty_id === selectedFacultyId)?.full_name ?? selectedFacultyId}`
-        : "";
+  const viewSelection = view === "block" ? shownBlockId : view === "room" ? shownRoomCode : shownFacultyId;
+  const isFilterActive = Boolean(viewSelection);
+  const activeFilterLabel = !viewSelection
+    ? ""
+    : view === "block"
+      ? `Block ${blocks.find((b) => b.block_id === shownBlockId)?.name ?? shownBlockId}`
+      : view === "room"
+        ? `Room ${shownRoomCode}`
+        : `Faculty ${faculty.find((f) => f.faculty_id === shownFacultyId)?.full_name ?? shownFacultyId}`;
 
-  function handleClearFilter() {
-    setSelectedBlockId("");
-    setSelectedRoomCode("");
-    setSelectedFacultyId("");
+  const scheduleOptions: SearchSelectOption[] = schedules.map((s) => {
+    const isMaster = s.schedule_type === "master";
+    const badge = s.finalized_at != null
+      ? "[Finalized]"
+      : isMaster
+        ? (s.assignments.length === 0 ? "[Empty]" : "[Accepted draft]")
+        : "[Candidate]";
+    return {
+      value: s.schedule_id,
+      label: `${isMaster ? "Master Schedule" : "Routine Candidate"} — ${formatScheduleDate(s.created_at)}`,
+      description: badge,
+    };
+  });
+  const viewOptions: SearchSelectOption[] = view === "block"
+    ? blocks.map((block) => ({ value: block.block_id, label: block.name }))
+    : view === "room"
+      ? rooms.map((room) => ({
+        value: room.room_code,
+        label: room.room_code,
+        description: ROOM_TYPE_LABEL[room.room_type] ?? room.room_type,
+      }))
+      : filterFaculty.map((f) => ({
+        value: f.faculty_id,
+        label: f.full_name,
+        description: f.is_active ? undefined : "Inactive",
+      }));
+
+  function handleViewSelection(value: string) {
+    if (view === "block") setSelectedBlockId(value);
+    else if (view === "room") setSelectedRoomCode(value);
+    else setSelectedFacultyId(value);
   }
 
   function handleScheduleChange(newScheduleId: string) {
@@ -619,11 +702,13 @@ export default function CommitteeTimetablePage() {
     setExportingFormat(format);
     setExportError("");
     try {
-      const { blob, filename } = await api.exportSchedule(scheduleId, format, {
-        blockId: selectedBlockId || undefined,
-        roomCode: selectedRoomCode || undefined,
-        facultyId: selectedFacultyId || undefined,
-      });
+      const { blob, filename } = await api.exportSchedule(
+        scheduleId,
+        format,
+        exportWhole
+          ? { blockId: undefined, roomCode: undefined, facultyId: undefined }
+          : viewScope(view, { blockId: shownBlockId, roomCode: shownRoomCode, facultyId: shownFacultyId }),
+      );
       saveFile(blob, filename);
     } catch (caught) {
       // A refusal belongs to the schedule that was exported, not to one the
@@ -748,35 +833,14 @@ export default function CommitteeTimetablePage() {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   {/* Schedule Selector */}
                   <div className="flex flex-wrap items-center gap-3 min-w-0 max-w-full">
-                    <label htmlFor="schedule-select" className="font-label-md text-xs uppercase font-bold text-on-surface-variant">
-                      Schedule:
-                    </label>
-                    <div className="relative max-w-full">
-                      <select
-                        id="schedule-select"
-                        aria-label="Select Schedule"
-                        value={selectedScheduleId}
-                        onChange={(e) => handleScheduleChange(e.target.value)}
-                        className="max-w-full px-3.5 py-2 pr-8 border border-outline-variant rounded-lg bg-surface-container-low text-on-surface text-base md:text-sm font-medium focus:ring-2 focus:ring-primary focus:outline-none"
-                      >
-                        {schedules.map((s) => {
-                          const isMaster = s.schedule_type === "master";
-                          const isFinal = s.finalized_at != null;
-                          const dateStr = formatScheduleDate(s.created_at);
-                          const typeLabel = isMaster ? "Master Schedule" : "Routine Candidate";
-                          const badgeStr = isFinal
-                            ? "[Finalized]"
-                            : isMaster
-                              ? (s.assignments.length === 0 ? "[Empty]" : "[Accepted draft]")
-                              : "[Candidate]";
-                          return (
-                            <option key={s.schedule_id} value={s.schedule_id}>
-                              {typeLabel} — {dateStr} {badgeStr}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                    <SearchSelect
+                      label="Schedule"
+                      value={selectedScheduleId}
+                      options={scheduleOptions}
+                      onChange={handleScheduleChange}
+                      placeholder="Search schedules"
+                      className="w-full sm:w-96 max-w-full"
+                    />
 
                     {/* Finalized or Candidate badge */}
                     {isFinalized ? (
@@ -856,8 +920,28 @@ export default function CommitteeTimetablePage() {
                             <span>{exportingFormat === format ? `Exporting ${label}…` : `Export ${label}`}</span>
                           </button>
                         ))}
+                        <div role="group" aria-label="Export scope" className="inline-flex rounded-lg border border-outline-variant overflow-hidden text-xs">
+                          {isFilterActive && (
+                            <button
+                              type="button"
+                              aria-pressed={!exportWhole}
+                              onClick={() => setExportWhole(false)}
+                              className={`px-2.5 py-1.5 font-semibold ${!exportWhole ? "bg-primary text-on-primary" : "text-on-surface-variant"}`}
+                            >
+                              This {VIEW_LABEL[view].toLowerCase()}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-pressed={exportWhole || !isFilterActive}
+                            onClick={() => setExportWhole(true)}
+                            className={`px-2.5 py-1.5 font-semibold ${exportWhole || !isFilterActive ? "bg-primary text-on-primary" : "text-on-surface-variant"}`}
+                          >
+                            Whole schedule
+                          </button>
+                        </div>
                         <span className="text-xs text-on-surface-variant" data-testid="export-scope">
-                          {isFilterActive ? `${activeFilterLabel} only` : "Whole schedule"}
+                          {isFilterActive && !exportWhole ? `${activeFilterLabel} only` : "Whole schedule"}
                         </span>
                       </div>
                     )}
@@ -877,99 +961,34 @@ export default function CommitteeTimetablePage() {
                     className="md:hidden print:hidden flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase border border-outline-variant rounded-lg text-on-surface-variant"
                   >
                     <Filter className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>{filtersOpen ? "Hide filters" : isFilterActive ? "Show filters (1 active)" : "Show filters"}</span>
+                    <span>{filtersOpen ? "Hide filters" : "Show filters"}</span>
                   </button>
 
-                  {/* Filter Controls: One Block or One Room */}
-                  <div id="timetable-filters" className={`${filtersOpen ? "flex" : "hidden md:flex"} flex-wrap items-center gap-3 min-w-0 max-w-full`}>
-                    <div className="flex items-center gap-1.5 text-xs text-on-surface-variant font-bold uppercase">
-                      <Filter className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Filter:</span>
+                  {/* View controls: one Block, one room or one member at a time */}
+                  <div id="timetable-filters" className={`${filtersOpen ? "flex" : "hidden md:flex"} flex-wrap items-end gap-3 min-w-0 max-w-full`}>
+                    <div role="group" aria-label="Timetable view" className="inline-flex rounded-lg border border-outline-variant overflow-hidden self-end mb-[2px]">
+                      {(["block", "room", "faculty"] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          aria-pressed={view === option}
+                          onClick={() => setView(option)}
+                          className={`px-3 py-2 text-xs font-bold ${view === option ? "bg-primary text-on-primary" : "text-on-surface-variant hover:bg-surface-container"}`}
+                        >
+                          {VIEW_LABEL[option]} view
+                        </button>
+                      ))}
                     </div>
-
-                    {/* Block Filter */}
-                    <div className="relative max-w-full">
-                      <select
-                        id="block-filter"
-                        aria-label="Filter by Block"
-                        value={selectedBlockId}
-                        onChange={(e) => {
-                          setSelectedBlockId(e.target.value);
-                          if (e.target.value) {
-                            setSelectedRoomCode("");
-                            setSelectedFacultyId("");
-                          }
-                        }}
-                        className="max-w-full px-3 py-1.5 pr-7 border border-outline-variant rounded-lg bg-surface-container-low text-base md:text-xs text-on-surface font-medium focus:ring-2 focus:ring-primary focus:outline-none"
-                      >
-                        <option value="">All Blocks</option>
-                        {blocks.map((block) => (
-                          <option key={block.block_id} value={block.block_id}>
-                            Block: {block.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Room Filter */}
-                    <div className="relative max-w-full">
-                      <select
-                        id="room-filter"
-                        aria-label="Filter by Room"
-                        value={selectedRoomCode}
-                        onChange={(e) => {
-                          setSelectedRoomCode(e.target.value);
-                          if (e.target.value) {
-                            setSelectedBlockId("");
-                            setSelectedFacultyId("");
-                          }
-                        }}
-                        className="max-w-full px-3 py-1.5 pr-7 border border-outline-variant rounded-lg bg-surface-container-low text-base md:text-xs text-on-surface font-medium focus:ring-2 focus:ring-primary focus:outline-none"
-                      >
-                        <option value="">All Rooms</option>
-                        {rooms.map((room) => (
-                          <option key={room.room_code} value={room.room_code}>
-                            Room: {room.room_code} ({ROOM_TYPE_LABEL[room.room_type] ?? room.room_type})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Faculty Filter */}
-                    <div className="relative max-w-full">
-                      <select
-                        id="faculty-filter"
-                        aria-label="Filter by Faculty"
-                        value={selectedFacultyId}
-                        onChange={(e) => {
-                          setSelectedFacultyId(e.target.value);
-                          if (e.target.value) {
-                            setSelectedBlockId("");
-                            setSelectedRoomCode("");
-                          }
-                        }}
-                        className="max-w-full px-3 py-1.5 pr-7 border border-outline-variant rounded-lg bg-surface-container-low text-base md:text-xs text-on-surface font-medium focus:ring-2 focus:ring-primary focus:outline-none"
-                      >
-                        <option value="">All Faculty</option>
-                        {filterFaculty.map((f) => (
-                          <option key={f.faculty_id} value={f.faculty_id}>
-                            Faculty: {f.full_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Clear Filter Button */}
-                    {isFilterActive && (
-                      <button
-                        onClick={handleClearFilter}
-                        aria-label="Clear filter"
-                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary-fixed/20 border border-primary/30 rounded-lg transition-colors"
-                      >
-                        <X className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>Clear filter</span>
-                      </button>
-                    )}
+                    <SearchSelect
+                      key={view}
+                      label={VIEW_LABEL[view]}
+                      value={viewSelection}
+                      options={viewOptions}
+                      onChange={handleViewSelection}
+                      placeholder={`Search ${VIEW_LABEL[view].toLowerCase()}s`}
+                      emptyMessage={`No ${VIEW_LABEL[view].toLowerCase()}s in the catalog.`}
+                      className="w-full sm:w-64 max-w-full"
+                    />
                   </div>
                 </div>
 
@@ -992,7 +1011,7 @@ export default function CommitteeTimetablePage() {
                     </span>
                     {isFilterActive && (
                       <span>
-                        Active Filter:{" "}
+                        Showing:{" "}
                         <strong className="text-primary">{activeFilterLabel}</strong>
                       </span>
                     )}
@@ -1022,14 +1041,8 @@ export default function CommitteeTimetablePage() {
                 className="border border-outline-variant rounded-xl bg-surface-container-lowest p-12 text-center space-y-3"
               >
                 <p className="text-on-surface-variant font-medium text-base">
-                  No assignments match the selected filter.
+                  No classes scheduled for {activeFilterLabel}.
                 </p>
-                <button
-                  onClick={handleClearFilter}
-                  className="px-4 py-2 bg-primary text-on-primary rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity"
-                >
-                  Clear filter
-                </button>
               </div>
             )}
 

@@ -477,3 +477,59 @@ it("keeps the per-row role select at 16px below md so iOS does not zoom", async 
 
   expect(screen.getByLabelText("Role for scheduler")).toHaveClass("text-base", "md:text-sm");
 });
+
+it("renames an account and shows the new name in its row", async () => {
+  vi.mocked(api.updateUser).mockResolvedValue({ ...scheduler, username: "j.delacruz" });
+  const user = userEvent.setup();
+  render(<MemoryRouter><UsersPage /></MemoryRouter>);
+  await screen.findByText("scheduler");
+
+  // The follow-up list read reflects the rename, as the server would.
+  vi.mocked(api.listUsers).mockResolvedValue({
+    items: [
+      { ...scheduler, user_id: "u1", username: "admin", role: "department_administrator" },
+      { ...scheduler, user_id: "u4", username: "backup", role: "department_administrator" },
+      { ...scheduler, username: "j.delacruz" },
+    ],
+  });
+  await user.click(screen.getByRole("button", { name: "Rename scheduler" }));
+  const input = screen.getByLabelText(/new username/i);
+  expect(input).toHaveValue("scheduler");
+  await user.clear(input);
+  await user.type(input, "  j.delacruz ");
+  await user.click(screen.getByRole("button", { name: "Rename" }));
+
+  expect(api.updateUser).toHaveBeenCalledWith("u2", { username: "j.delacruz" });
+  expect(await screen.findByText("j.delacruz")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("keeps the rename dialog open with the reason when the name is taken", async () => {
+  vi.mocked(api.updateUser).mockRejectedValue(
+    new ApiError(409, "DUPLICATE_RESOURCE", "A record with these values already exists."),
+  );
+  const user = userEvent.setup();
+  render(<MemoryRouter><UsersPage /></MemoryRouter>);
+  await screen.findByText("scheduler");
+
+  await user.click(screen.getByRole("button", { name: "Rename scheduler" }));
+  const input = screen.getByLabelText(/new username/i);
+  await user.clear(input);
+  await user.type(input, "backup");
+  await user.click(screen.getByRole("button", { name: "Rename" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("The username backup is already taken.");
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
+
+it("does not send a rename that keeps the same name", async () => {
+  const user = userEvent.setup();
+  render(<MemoryRouter><UsersPage /></MemoryRouter>);
+  await screen.findByText("scheduler");
+
+  await user.click(screen.getByRole("button", { name: "Rename scheduler" }));
+  await user.click(screen.getByRole("button", { name: "Rename" }));
+
+  expect(api.updateUser).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
