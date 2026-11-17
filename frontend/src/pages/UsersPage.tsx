@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { KeyRound, Plus } from "lucide-react";
+import { KeyRound, Pencil, Plus } from "lucide-react";
 import { ApiError, api, type ManagedUser, type User } from "../api/client";
 import Modal from "../components/modals/Modal";
 import PasswordModal from "../components/modals/PasswordModal";
@@ -92,6 +92,73 @@ function UserForm({ onClose, onSaved }: { onClose: () => void; onSaved: (created
   );
 }
 
+function RenameForm({
+  account,
+  onClose,
+  onSaved,
+}: {
+  account: ManagedUser;
+  onClose: () => void;
+  onSaved: (updated: ManagedUser) => void;
+}) {
+  const [username, setUsername] = useState(account.username);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = username.trim();
+    if (next === account.username) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      onSaved(await api.updateUser(account.user_id, { username: next }));
+    } catch (caught: unknown) {
+      setError(
+        caught instanceof ApiError && caught.code === "DUPLICATE_RESOURCE"
+          ? `The username ${next} is already taken.`
+          : isFieldValidationError(caught, "body.username")
+            ? USERNAME_RULES
+            : caught instanceof ApiError ? caught.message : "Could not rename the account.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const close = () => {
+    if (!saving) onClose();
+  };
+  return (
+    <Modal title={`Rename ${account.username}`} onClose={close}>
+      <form onSubmit={submit} className="flex flex-col min-h-0">
+        <div className="p-6 grid gap-5 overflow-y-auto">
+          <label className="block space-y-1.5">
+            <span className="font-label-md text-[11px] uppercase text-on-surface-variant">New username</span>
+            <input
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              maxLength={100}
+              autoComplete="off"
+              className="w-full border border-outline-variant rounded-lg px-3 py-2.5 bg-surface-container-lowest outline-none focus:border-primary"
+            />
+          </label>
+          <p className="text-sm text-on-surface-variant">The account signs in with the new name from now on; its password and role stay the same.</p>
+          {error && <p role="alert" className="text-sm text-error">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-3 p-5 border-t border-outline-variant bg-surface-bright shrink-0">
+          <button type="button" onClick={close} aria-disabled={saving} className="px-4 py-2 aria-disabled:opacity-60">Cancel</button>
+          <button disabled={saving || !username.trim()} className="px-5 py-2 rounded bg-surface-tint text-white font-bold disabled:opacity-60">{saving ? "Saving..." : "Rename"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -100,6 +167,7 @@ export default function UsersPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [settingPasswordFor, setSettingPasswordFor] = useState<ManagedUser | null>(null);
+  const [renaming, setRenaming] = useState<ManagedUser | null>(null);
   // Rows with a PATCH in flight. Their controls are aria-disabled and guarded
   // rather than disabled, so the control keeping focus does not drop it.
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
@@ -281,6 +349,15 @@ export default function UsersPage() {
                           {soleAdmin && <span className="block text-xs text-on-surface-variant">Only active Administrator</span>}
                         </td>
                         <td className="px-4 py-3 text-right space-x-2">
+                          <button
+                            aria-label={`Rename ${account.username}`}
+                            aria-disabled={busy}
+                            onClick={() => { if (!busy) setRenaming(account); }}
+                            className="px-3 py-1.5 rounded border border-outline-variant text-xs hover:border-primary aria-disabled:opacity-60"
+                          >
+                            <Pencil className="inline w-3 h-3 mr-1" aria-hidden="true" />
+                            Rename
+                          </button>
                           {/* Your own password is changed from the top bar, with the current one. */}
                           {!isSelf && (
                             <button
@@ -330,6 +407,22 @@ export default function UsersPage() {
           title={`Set password for ${settingPasswordFor.username}`}
           submit={(_current, next) => api.resetUserPassword(settingPasswordFor.user_id, next)}
           onClose={() => setSettingPasswordFor(null)}
+        />
+      )}
+      {renaming && (
+        <RenameForm
+          account={renaming}
+          onClose={() => setRenaming(null)}
+          onSaved={(updated) => {
+            setRenaming(null);
+            // The signed-in name is read once at sign-in, as with a role change.
+            if (updated.user_id === currentUser?.user_id) {
+              window.location.reload();
+              return;
+            }
+            setUsers((current) => current.map((row) => (row.user_id === updated.user_id ? updated : row)));
+            void loadUsers({ quiet: true });
+          }}
         />
       )}
       {creating && (

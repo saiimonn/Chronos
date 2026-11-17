@@ -1371,7 +1371,7 @@ export const api = {
 
   listUsers: () => request<ListResponse<ManagedUser>>("/users"),
   createUser: (data: UserCreate) => request<ManagedUser>("/users", { method: "POST", body: data }),
-  updateUser: (userId: string, data: Partial<Pick<ManagedUser, "role" | "is_active">>) =>
+  updateUser: (userId: string, data: Partial<Pick<ManagedUser, "username" | "role" | "is_active">>) =>
     request<ManagedUser>(`/users/${encodeURIComponent(userId)}`, { method: "PATCH", body: data }),
   resetUserPassword: (userId: string, newPassword: string) =>
     request<void>(`/users/${encodeURIComponent(userId)}/password`, {

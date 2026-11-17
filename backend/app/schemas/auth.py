@@ -35,6 +35,23 @@ class ManagedUserResponse(UserResponse):
     created_at: datetime
 
 
+def _plain_username(value: str) -> str:
+    # Refused rather than stripped: " admin " would otherwise be a
+    # lookalike of "admin". isprintable() rejects NUL and the zero-width
+    # format characters, which PostgreSQL cannot store or a person see.
+    # NFKC refuses full-width and decomposed forms of an existing name.
+    if (
+        value != value.strip()
+        or not value.isprintable()
+        or unicodedata.normalize("NFKC", value) != value
+    ):
+        raise ValueError(
+            "Username must be printable, NFKC-normalized, and have no "
+            "leading or trailing whitespace."
+        )
+    return value
+
+
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: NewPassword
@@ -43,30 +60,24 @@ class UserCreate(BaseModel):
     @field_validator("username")
     @classmethod
     def username_is_plain(cls, value: str) -> str:
-        # Refused rather than stripped: " admin " would otherwise be a
-        # lookalike of "admin". isprintable() rejects NUL and the zero-width
-        # format characters, which PostgreSQL cannot store or a person see.
-        # NFKC refuses full-width and decomposed forms of an existing name.
-        if (
-            value != value.strip()
-            or not value.isprintable()
-            or unicodedata.normalize("NFKC", value) != value
-        ):
-            raise ValueError(
-                "Username must be printable, NFKC-normalized, and have no "
-                "leading or trailing whitespace."
-            )
-        return value
+        return _plain_username(value)
 
 
 class UserUpdate(BaseModel):
-    """Either field may be omitted; an omitted field is left unchanged."""
+    """Any field may be omitted; an omitted field is left unchanged."""
 
-    # A password or username in the body would otherwise be ignored with a 200.
+    # A password in the body would otherwise be ignored with a 200.
     model_config = ConfigDict(extra="forbid")
 
+    # A rename, by an administrator; the same rules as a new account's name.
+    username: str | None = Field(default=None, min_length=1, max_length=100)
     role: UserRole | None = None
     is_active: bool | None = None
+
+    @field_validator("username")
+    @classmethod
+    def username_is_plain(cls, value: str | None) -> str | None:
+        return None if value is None else _plain_username(value)
 
 
 class PasswordChange(BaseModel):
