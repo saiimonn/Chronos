@@ -29,7 +29,7 @@ def _response(saved: HardConstraintConfiguration | None) -> HardConstraintsRespo
     defaults = ConstraintLimitsModel.from_limits(ConstraintLimits())
     return HardConstraintsResponse(
         version=saved.version if saved else None,
-        limits=ConstraintLimitsModel(**saved.limits) if saved else defaults,
+        limits=ConstraintLimitsModel.from_saved(saved.limits) if saved else defaults,
         defaults=defaults,
         created_at=saved.created_at if saved else None,
         created_by_user_id=saved.created_by_user_id if saved else None,
@@ -58,7 +58,7 @@ def list_limit_versions(db: DbSession) -> HardConstraintsVersionList:
             HardConstraintsVersion(
                 version=saved.version,
                 is_active=saved.is_active,
-                limits=ConstraintLimitsModel(**saved.limits),
+                limits=ConstraintLimitsModel.from_saved(saved.limits),
                 created_at=saved.created_at,
                 created_by_username=username,
             )

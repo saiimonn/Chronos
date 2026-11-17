@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from itertools import combinations
 from uuid import UUID
 
@@ -476,7 +477,8 @@ class ConstraintEngine:
         resolved: Sequence[_ResolvedAssignment],
         locked_assignments: Sequence[LockedAssignment],
     ) -> list[ConstraintConflict]:
-        """A faculty member's back-to-back run on a day stays within the limit.
+        """A faculty member's back-to-back run on a day stays under the
+        back-to-back limit (6 hours by default), the same limit a Block has.
 
         Blocks of one offering sit in one combined session, so a meeting window
         counts once however many classes share it. Classes already placed in
@@ -531,6 +533,8 @@ class ConstraintEngine:
             )
 
         candidate_ids = {item.assignment.class_id for item in resolved}
+        limit = timedelta(hours=problem.limits.back_to_back_limit_hours)
+        day_zero = datetime.min.date()
         conflicts: list[ConstraintConflict] = []
         for faculty_id, days in meetings.items():
             for day, windows in days.items():
@@ -541,22 +545,17 @@ class ConstraintEngine:
                     else:
                         runs.append([window])
                 for run in runs:
-                    counts = {kind: 0 for kind in SubjectType}
-                    for window in run:
-                        counts[windows[window][0]] += 1
-                    over = [
-                        kind
-                        for kind in (SubjectType.LEC, SubjectType.LAB)
-                        if counts[kind] > problem.limits.consecutive_limit(kind)
-                    ]
+                    first = run[0][0]
+                    last = max(w[1] for w in run)
                     classes = [entry for w in run for entry in windows[w][1]]
-                    if not over or not candidate_ids & {c for c, _, _ in classes}:
+                    # Exactly the limit counts, as for a Block's run.
+                    if (
+                        datetime.combine(day_zero, last)
+                        - datetime.combine(day_zero, first)
+                        < limit
+                        or not candidate_ids & {c for c, _, _ in classes}
+                    ):
                         continue
-                    kinds = " and ".join(
-                        f"{counts[kind]} "
-                        f"{'lectures' if kind is SubjectType.LEC else 'labs'}"
-                        for kind in over
-                    )
                     labels = list(dict.fromkeys(label for _, _, label in classes))
                     conflicts.append(
                         ConstraintConflict(
@@ -564,12 +563,10 @@ class ConstraintEngine:
                             resource_key=(str(faculty_id), day),
                             class_ids=tuple(c for c, _, _ in classes),
                             time_slot_ids=tuple(s for _, s, _ in classes),
-                            message=f"Faculty {names[faculty_id]} teaches {kinds} "
-                            f"back to back on {day} "
-                            f"{run[0][0]:%H:%M}-{max(w[1] for w in run):%H:%M}; "
-                            f"the limit is {problem.limits.max_consecutive_lectures} "
-                            f"lectures or {problem.limits.max_consecutive_labs} "
-                            "labs in a row: "
+                            message=f"Faculty {names[faculty_id]} teaches back to "
+                            f"back on {day} {first:%H:%M}-{last:%H:%M}; a "
+                            "teacher's classes in a row must total less than "
+                            f"{problem.limits.back_to_back_limit_hours} hours: "
                             f"{', '.join(labels)}.",
                         )
                     )

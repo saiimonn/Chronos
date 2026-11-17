@@ -191,7 +191,7 @@ class ScheduleValidator:
                 meetings.setdefault((section.block_id, str(weekday)), []).append(
                     (start, end, assignment)
                 )
-        run_limit = timedelta(hours=problem.limits.block_run_limit_hours)
+        run_limit = timedelta(hours=problem.limits.back_to_back_limit_hours)
         conflicts = []
         for (block_id, weekday), entries in meetings.items():
             runs: list[list[tuple]] = []
@@ -215,7 +215,7 @@ class ScheduleValidator:
                             f"{block_name} has back-to-back classes on {weekday} "
                             f"{first:%H:%M}-{last:%H:%M}; a Block's classes in a "
                             "row must total less than "
-                            f"{problem.limits.block_run_limit_hours} hours."
+                            f"{problem.limits.back_to_back_limit_hours} hours."
                         ),
                     )
                 )

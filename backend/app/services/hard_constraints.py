@@ -25,7 +25,7 @@ def active_constraint_limits(db: Session) -> ConstraintLimits:
     """The limits every problem built now is checked against; the code
     defaults until an administrator saves a version."""
     active = get_active_configuration(db)
-    return ConstraintLimits(**active.limits) if active is not None else ConstraintLimits()
+    return ConstraintLimits.from_saved(active.limits if active is not None else None)
 
 
 def list_versions(db: Session) -> list[tuple[HardConstraintConfiguration, str | None]]:

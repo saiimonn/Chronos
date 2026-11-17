@@ -248,7 +248,7 @@ def encode_constraint_limits(limits: ConstraintLimits) -> JsonObject:
 
 def decode_constraint_limits(value: Mapping[str, Any] | None) -> ConstraintLimits:
     # Payloads queued before limits were configurable use the standing rules.
-    return ConstraintLimits(**(value or {}))
+    return ConstraintLimits.from_saved(value)
 
 
 def _encode_lab_partners(partners: Mapping[UUID, UUID]) -> JsonObject:

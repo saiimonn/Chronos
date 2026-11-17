@@ -1378,7 +1378,8 @@ def test_three_lectures_in_a_row_are_allowed_and_a_fourth_is_not():
     [conflict] = _consecutive(ConstraintEngine().evaluate(*four))
     assert len(conflict.class_ids) == 4
     assert conflict.resource_key == (str(FACULTY_1), "M")
-    assert "4 lectures back to back on M 08:00-14:00" in conflict.message
+    assert "back to back on M 08:00-14:00" in conflict.message
+    assert "must total less than 6 hours" in conflict.message
 
 
 def test_two_labs_in_a_row_are_allowed_and_a_third_is_not():
@@ -1391,7 +1392,26 @@ def test_two_labs_in_a_row_are_allowed_and_a_third_is_not():
 
     assert _consecutive(ConstraintEngine().evaluate(*two)) == []
     [conflict] = _consecutive(ConstraintEngine().evaluate(*three))
-    assert "3 labs back to back" in conflict.message
+    assert "back to back on M 08:00-15:30" in conflict.message
+
+
+def test_mixed_labs_and_lectures_share_the_same_hour_limit():
+    # 2 labs then 2 lectures: 8 hours straight. Counted per type this passed.
+    mixed = _run_problem(
+        (LAB, time(8), time(10, 30)),
+        (LAB, time(10, 30), time(13)),
+        (LEC, time(13), time(14, 30)),
+        (LEC, time(14, 30), time(16)),
+    )
+    [conflict] = _consecutive(ConstraintEngine().evaluate(*mixed))
+    assert len(conflict.class_ids) == 4
+
+    # A saved limit replaces the 6-hour default.
+    problem, assignments = _run_problem(
+        (LEC, time(8), time(9, 30)), (LEC, time(9, 30), time(11))
+    )
+    shorter = replace(problem, limits=ConstraintLimits(back_to_back_limit_hours=3))
+    assert len(_consecutive(ConstraintEngine().evaluate(shorter, assignments))) == 1
 
 
 def test_a_gap_breaks_the_run():

@@ -49,7 +49,7 @@ PREFERRED_FACULTY_PROBABILITY = 0.75
 #   crossover and repair can never build a longer day. This narrows the search
 #   space like an availability mask does; fitness F(C) = <A, -H, P> and the
 #   hard constraints are unchanged.
-# - block_run_limit_hours: a Block may not sit through this long of
+# - back_to_back_limit_hours: a Block may not sit through this long of
 #   back-to-back classes (exactly counts). Each window keeps one break slot
 #   free so the stretches before and after it both stay shorter. The validator
 #   flags any run that still reaches it (BLOCK_CONSECUTIVE_EXCEEDED).
@@ -105,7 +105,7 @@ class GeneSampler:
         # The Block day's length; a run that cannot place every class at
         # 8 hours may be retried longer (see app.services.jobs.handlers).
         self._day_span = day_span_minutes or problem.limits.block_day_target_hours * 60
-        self._run_limit = problem.limits.block_run_limit_hours * 60
+        self._run_limit = problem.limits.back_to_back_limit_hours * 60
         self._fits_stretched = partial(
             _fits_stretched, limit=problem.limits.block_day_limit_hours * 60
         )

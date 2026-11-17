@@ -1,5 +1,6 @@
 """Hard Constraints page API contracts."""
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
 from uuid import UUID
@@ -16,15 +17,13 @@ class ConstraintLimitsModel(BaseModel):
 
     full_time_max_units: int = Field(default=_DEFAULTS.full_time_max_units, ge=1, le=60)
     part_time_max_units: int = Field(default=_DEFAULTS.part_time_max_units, ge=1, le=60)
-    max_consecutive_lectures: int = Field(
-        default=_DEFAULTS.max_consecutive_lectures, ge=1, le=10
-    )
-    max_consecutive_labs: int = Field(default=_DEFAULTS.max_consecutive_labs, ge=1, le=10)
     block_day_target_hours: int = Field(
         default=_DEFAULTS.block_day_target_hours, ge=1, le=24
     )
     block_day_limit_hours: int = Field(default=_DEFAULTS.block_day_limit_hours, ge=1, le=24)
-    block_run_limit_hours: int = Field(default=_DEFAULTS.block_run_limit_hours, ge=1, le=24)
+    back_to_back_limit_hours: int = Field(
+        default=_DEFAULTS.back_to_back_limit_hours, ge=1, le=24
+    )
 
     @model_validator(mode="after")
     def validate_relations(self) -> "ConstraintLimitsModel":
@@ -37,6 +36,11 @@ class ConstraintLimitsModel(BaseModel):
     @classmethod
     def from_limits(cls, limits: ConstraintLimits) -> "ConstraintLimitsModel":
         return cls(**asdict(limits))
+
+    @classmethod
+    def from_saved(cls, value: Mapping[str, object]) -> "ConstraintLimitsModel":
+        """A stored version, including ones saved with earlier field names."""
+        return cls.from_limits(ConstraintLimits.from_saved(value))
 
 
 class HardConstraintsResponse(BaseModel):

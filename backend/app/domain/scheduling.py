@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import time, timedelta
 from enum import StrEnum
@@ -107,15 +107,14 @@ class ConstraintLimits:
 
     full_time_max_units: int = FULL_TIME_MAX_WORKLOAD
     part_time_max_units: int = PART_TIME_MAX_WORKLOAD
-    # A teacher's longest back-to-back run on one day, by subject type.
-    max_consecutive_lectures: int = 3
-    max_consecutive_labs: int = 2
     # A Block's day (first class start to last class end): the GA aims for the
     # target and only lengthens it, an hour at a time, up to the limit.
     block_day_target_hours: int = 8
     block_day_limit_hours: int = 10
-    # A Block may not sit in back-to-back classes this long (exactly counts).
-    block_run_limit_hours: int = 6
+    # Neither a teacher nor a Block may sit in back-to-back classes this long
+    # (exactly counts). With 1.5h lectures and 2.5h labs, 6 hours allows at
+    # most 3 lectures or 2 labs in a row.
+    back_to_back_limit_hours: int = 6
 
     def __post_init__(self) -> None:
         for name in self.__slots__:
@@ -128,18 +127,26 @@ class ConstraintLimits:
                 "block_day_target_hours must not exceed block_day_limit_hours, "
                 "which must not exceed 24"
             )
-        if self.block_run_limit_hours > self.block_day_limit_hours:
-            raise ValueError("block_run_limit_hours must not exceed block_day_limit_hours")
+        if self.back_to_back_limit_hours > self.block_day_limit_hours:
+            raise ValueError(
+                "back_to_back_limit_hours must not exceed block_day_limit_hours"
+            )
+
+    @classmethod
+    def from_saved(cls, value: "Mapping[str, object] | None") -> "ConstraintLimits":
+        """Limits from a saved version or job payload. Missing fields take the
+        defaults; fields from earlier versions are dropped or renamed."""
+        saved = dict(value or {})
+        saved.pop("max_consecutive_lectures", None)
+        saved.pop("max_consecutive_labs", None)
+        if "block_run_limit_hours" in saved:
+            saved["back_to_back_limit_hours"] = saved.pop("block_run_limit_hours")
+        return cls(**saved)
 
     def max_workload(self, member: "FacultyDTO") -> int:
         return (
             self.full_time_max_units if member.is_full_time else self.part_time_max_units
         )
-
-    def consecutive_limit(self, subject_type: "SubjectType") -> int:
-        if subject_type is SubjectType.LAB:
-            return self.max_consecutive_labs
-        return self.max_consecutive_lectures
 
 
 @dataclass(frozen=True, slots=True)

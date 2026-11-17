@@ -888,11 +888,9 @@ export interface GAConfigurationVersionList {
 export interface ConstraintLimits {
   full_time_max_units: number;
   part_time_max_units: number;
-  max_consecutive_lectures: number;
-  max_consecutive_labs: number;
   block_day_target_hours: number;
   block_day_limit_hours: number;
-  block_run_limit_hours: number;
+  back_to_back_limit_hours: number;
 }
 
 export interface HardConstraints {

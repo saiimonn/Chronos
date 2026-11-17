@@ -28,7 +28,7 @@ def test_defaults_apply_until_a_version_is_saved(db_session: Session):
 def test_saved_limits_reach_new_problems(db_session: Session):
     seed_scheduling_problem(db_session)
     client = _admin(db_session)
-    limits = {**client.get(URL).json()["defaults"], "max_consecutive_lectures": 2}
+    limits = {**client.get(URL).json()["defaults"], "back_to_back_limit_hours": 5}
 
     saved = client.put(URL, json=limits)
 
@@ -38,7 +38,7 @@ def test_saved_limits_reach_new_problems(db_session: Session):
     versions = client.get(f"{URL}/versions").json()["items"]
     assert [(v["version"], v["is_active"]) for v in versions] == [(2, True), (1, False)]
     problem = SQLAlchemySchedulingProblemProvider(db_session).get_problem(TERM_ID)
-    assert problem.limits.max_consecutive_lectures == 2
+    assert problem.limits.back_to_back_limit_hours == 5
 
 
 def test_only_administrators_save_and_bad_limits_are_refused(db_session: Session):
