@@ -237,6 +237,104 @@ def test_editing_a_combined_session_needs_every_block_in_it_unlocked(
     }
 
 
+SECOND_SUBJECT_CLASS_ID = UUID("00000000-0000-0000-0000-0000000000c3")
+
+
+def _seed_partner_approved_without_shared_lecture(db: Session) -> None:
+    """Block B is approved holding its own second subject, but has no record
+    for the lecture it shares with Block A (left unplaced when generated)."""
+    seed_scheduling_problem(db)
+    add_combined_block(db)
+    first = db.get(Subject, "<SUBJECT-1>")
+    db.add(
+        Subject(
+            subject_code="<SUBJECT-2>",
+            **{
+                column.key: getattr(first, column.key)
+                for column in Subject.__table__.columns
+                if column.key != "subject_code"
+            },
+        )
+    )
+    second_offering = UUID("00000000-0000-0000-0000-0000000000f3")
+    db.flush()
+    db.add(
+        SubjectOffering(
+            offering_id=second_offering,
+            term_id=TERM_ID,
+            subject_code="<SUBJECT-2>",
+            group_no=1,
+        )
+    )
+    db.flush()
+    db.add(
+        BlockSectionOffering(
+            class_id=SECOND_SUBJECT_CLASS_ID,
+            block_id=OTHER_BLOCK_ID,
+            offering_id=second_offering,
+            term_id=TERM_ID,
+            subject_code="<SUBJECT-2>",
+        )
+    )
+    schedule = Schedule(term_id=TERM_ID, schedule_type=ScheduleType.MASTER.value)
+    db.add(schedule)
+    db.flush()
+    db.add(
+        ScheduleRecord(
+            schedule_id=schedule.schedule_id,
+            term_id=TERM_ID,
+            faculty_id=FACULTY_ID,
+            subject_code="<SUBJECT-2>",
+            class_id=SECOND_SUBJECT_CLASS_ID,
+            time_slot_id=TIME_SLOT_ID,
+            room_code="<ROOM-1>",
+            meeting_days="TTh",
+            time_slot="<TIME-SLOT-1>",
+            is_historical=False,
+        )
+    )
+    db.commit()
+
+
+def test_approving_a_shared_lecture_fills_the_approved_partner_missing_it(
+    db_session: Session,
+):
+    _seed_partner_approved_without_shared_lecture(db_session)
+    client = make_api_client(db_session)
+    schedule_id = client.get(f"/api/v1/schedules/master?term_id={TERM_ID}").json()[
+        "schedule_id"
+    ]
+
+    approved = _approve(client, schedule_id, BLOCK_ID, CLASS_ID)
+
+    assert approved.status_code == 200, approved.text
+    by_class = {item["class_id"]: item for item in approved.json()["schedule"]["assignments"]}
+    partner = by_class[str(OTHER_CLASS_ID)]
+    assert (
+        partner["faculty_id"],
+        partner["room_code"],
+        partner["meeting_days"],
+        partner["time_slot_id"],
+    ) == (str(FACULTY_ID), "<ROOM-1>", "MW", str(TIME_SLOT_ID))
+    # The partner's own approved class is untouched.
+    assert by_class[str(SECOND_SUBJECT_CLASS_ID)]["meeting_days"] == "TTh"
+
+
+def test_a_block_not_generated_yet_is_not_filled(db_session: Session):
+    seed_scheduling_problem(db_session)
+    add_combined_block(db_session)
+    db_session.commit()
+    client = make_api_client(db_session)
+    schedule_id = _master(client)
+
+    approved = _approve(client, schedule_id, BLOCK_ID, CLASS_ID)
+
+    assert approved.status_code == 200, approved.text
+    assert [item["class_id"] for item in approved.json()["schedule"]["assignments"]] == [
+        str(CLASS_ID)
+    ]
+
+
 def _seed_paired_labs(db: Session) -> None:
     """Blocks A and B of one cohort, each taking its own section of one LAB."""
     seed_scheduling_problem(db)
