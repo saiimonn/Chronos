@@ -52,6 +52,10 @@ BLOCK_DAY_SPAN_MINUTES = 8 * 60
 # before and after it both stay shorter. The validator flags any run that
 # still reaches it (BLOCK_CONSECUTIVE_EXCEEDED), outside the GA's H(C).
 BLOCK_RUN_LIMIT_MINUTES = 6 * 60
+# The longest a Block's day may ever run. A run that cannot place every class
+# in 8 hours is retried up to this, and a class no teacher can hold inside
+# its Block's window may stretch past the window only as far as this allows.
+BLOCK_DAY_SPAN_LIMIT_MINUTES = 10 * 60
 
 # (window start, window end, break start, break end) in minutes since midnight.
 DayWindow = tuple[int, int, int, int]
@@ -65,6 +69,18 @@ def _fits(window: DayWindow, start: int, end: int) -> bool:
     """A meeting from ``start`` to ``end`` lies in the window, off its break."""
     low, high, rest_start, rest_end = window
     return low <= start and end <= high and (end <= rest_start or start >= rest_end)
+
+
+def _fits_stretched(window: DayWindow, start: int, end: int) -> bool:
+    """Off the window's break, and keeping the Block's day, whatever of the
+    window it uses, within BLOCK_DAY_SPAN_LIMIT_MINUTES."""
+    low, high, rest_start, rest_end = window
+    return (
+        start >= high - BLOCK_DAY_SPAN_LIMIT_MINUTES
+        and end <= low + BLOCK_DAY_SPAN_LIMIT_MINUTES
+        # A window without a break marks it as empty (rest_start == rest_end).
+        and (rest_start == rest_end or end <= rest_start or start >= rest_end)
+    )
 
 
 class GeneSampler:
@@ -137,6 +153,8 @@ class GeneSampler:
         self._slots_by_id = {slot.time_slot_id: slot for slot in problem.time_slots}
         # Each narrowed Offering's Block day window, break included.
         self._day_windows: dict[UUID, DayWindow] = {}
+        # Offerings let past their window, up to the day limit (see below).
+        self._stretched: set[UUID] = set()
         self._block_of_class = {
             section.class_id: section.block_id for section in problem.classes
         }
@@ -504,11 +522,23 @@ class GeneSampler:
                 faculty_pool = tuple(
                     f for f in self._faculty_pools[offering_id] if narrowed[f]
                 )
-                # ponytail: an Offering no teacher can hold inside the window
-                # keeps its full pool (and can exceed 8h or 6h in a row) rather than staying
-                # unresolved; widen the window choice if this shows up in runs.
+                # No teacher can hold it inside the window: let it out of the
+                # window, but only as far as a BLOCK_DAY_SPAN_LIMIT_MINUTES
+                # day, and never across the break. Past that it stays
+                # unplaced for the administrator to decide.
                 if not faculty_pool:
-                    continue
+                    narrowed = {
+                        faculty_id: tuple(
+                            slot_id
+                            for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
+                            if _fits_stretched(window, *single[slot_id])
+                        )
+                        for faculty_id in pool_keys.get(offering_id, ())
+                    }
+                    faculty_pool = tuple(
+                        f for f in self._faculty_pools[offering_id] if narrowed[f]
+                    )
+                    self._stretched.add(offering_id)
                 self._time_slot_pools.update(
                     ((offering_id, f), slots) for f, slots in narrowed.items()
                 )
@@ -627,7 +657,11 @@ class GeneSampler:
                         and all(s.time_slot_id in available for s in chain)
                         and (
                             offering_id not in self._day_windows
-                            or _fits(
+                            or (
+                                _fits_stretched
+                                if offering_id in self._stretched
+                                else _fits
+                            )(
                                 self._day_windows[offering_id],
                                 _minutes(slots[slot_id].start_time),
                                 _minutes(meeting_end(slots[slot_id], meeting_days)),

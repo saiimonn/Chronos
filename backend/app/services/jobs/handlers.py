@@ -20,6 +20,7 @@ from app.services.arm.preprocessing import (
 )
 from app.services.ga.day_balance import DEFAULT_DAY_BALANCE_WEIGHT
 from app.services.ga.engine import GAEngine
+from app.services.ga.operators import BLOCK_DAY_SPAN_LIMIT_MINUTES
 from app.services.ga.fitness import ZeroHistoricalAttainmentScorer
 from app.services.ga.metrics import GARunMetrics
 from app.services.ga.rule_scoring import SCORING_POLICY, RuleBackedHistoricalScorer
@@ -116,7 +117,7 @@ def _encode_candidate(candidate: CandidateSchedule) -> JsonObject:
 _PUBLISHED_SECONDS = "published_attempt_processing_seconds"
 # Block day lengths a per-Block run tries, in order: 8 hours, then longer
 # only when a shorter day cannot hold every class without a conflict.
-BLOCK_DAY_SPAN_RETRIES = (8 * 60, 9 * 60, 10 * 60)
+BLOCK_DAY_SPAN_RETRIES = (8 * 60, 9 * 60, BLOCK_DAY_SPAN_LIMIT_MINUTES)
 
 
 def run_ga(payload: Mapping[str, Any]) -> JsonObject:
