@@ -2129,3 +2129,58 @@ def confirm_block_replacement(
 
     db.commit()
     return get_schedule(db, schedule_id), validation_result
+
+
+def schedule_metrics(db: Session, schedule_id: UUID) -> dict[str, Any]:
+    """The thesis feasibility metrics plus descriptive utilization metrics."""
+    from dataclasses import asdict
+
+    from app.services.schedule_metrics import Ratio, compute_schedule_metrics
+
+    schedule = get_schedule(db, schedule_id)
+    problem = _get_problem(db, schedule.term_id)
+    candidate = _to_candidate(schedule)
+    validation = _validate_candidate(
+        problem, candidate, flag_inactive_faculty=schedule.finalized_at is None
+    )
+    metrics = compute_schedule_metrics(problem, candidate.assignments)
+
+    def ratio(item: Ratio) -> dict[str, Any]:
+        return {
+            "numerator": item.numerator,
+            "denominator": item.denominator,
+            "value": item.value,
+        }
+
+    def with_ratios(obj: Any) -> dict[str, Any]:
+        out = {}
+        for key in obj.__dataclass_fields__:
+            value = getattr(obj, key)
+            out[key] = ratio(value) if isinstance(value, Ratio) else (
+                asdict(value) if hasattr(value, "__dataclass_fields__") else value
+            )
+        return out
+
+    required = validation.required_class_count
+    time_out = with_ratios(metrics.time)
+    time_out["starts_by_slot"] = [
+        {"label": label, "sessions": count} for label, count in metrics.time.starts_by_slot
+    ]
+    return {
+        "schedule_id": str(schedule.schedule_id),
+        "feasibility": {
+            "required_class_count": required,
+            "assigned_class_count": validation.assigned_class_count,
+            "completeness": validation.assigned_class_count / required if required else None,
+            "hard_conflict_count": validation.hard_conflict_count,
+            "valid": bool(required)
+            and validation.assigned_class_count == required
+            and validation.hard_conflict_count == 0,
+        },
+        "rooms": [with_ratios(item) for item in metrics.rooms],
+        "faculty": with_ratios(metrics.faculty),
+        "blocks": with_ratios(metrics.blocks),
+        "time": time_out,
+        "window_hours_per_day": metrics.window_hours_per_day,
+        "class_days": metrics.class_days,
+    }
