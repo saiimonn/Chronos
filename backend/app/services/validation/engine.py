@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from itertools import combinations
 from uuid import UUID
 
@@ -93,7 +94,6 @@ _CONFLICT_ORDER = {
 
 # The most classes of one kind a faculty member may teach back to back on one
 # day. Classes are back to back when one starts as the previous one ends.
-CONSECUTIVE_CLASS_LIMIT = {SubjectType.LEC: 3, SubjectType.LAB: 2}
 
 
 _DAY_ORDER = ("M", "T", "W", "Th", "F", "Sa", "Su")
@@ -338,7 +338,7 @@ class ConstraintEngine:
                 for item in faculty_assignments
             }
             workload = sum(units_by_offering.values())
-            max_workload = faculty_assignments[0].faculty.max_workload
+            max_workload = problem.limits.max_workload(faculty_assignments[0].faculty)
             if workload > max_workload:
                 conflicts.append(
                     ConstraintConflict(
@@ -477,7 +477,8 @@ class ConstraintEngine:
         resolved: Sequence[_ResolvedAssignment],
         locked_assignments: Sequence[LockedAssignment],
     ) -> list[ConstraintConflict]:
-        """A faculty member's back-to-back run on a day stays within the limit.
+        """A faculty member's back-to-back run on a day stays under the
+        back-to-back limit (6 hours by default), the same limit a Block has.
 
         Blocks of one offering sit in one combined session, so a meeting window
         counts once however many classes share it. Classes already placed in
@@ -532,6 +533,8 @@ class ConstraintEngine:
             )
 
         candidate_ids = {item.assignment.class_id for item in resolved}
+        limit = timedelta(hours=problem.limits.back_to_back_limit_hours)
+        day_zero = datetime.min.date()
         conflicts: list[ConstraintConflict] = []
         for faculty_id, days in meetings.items():
             for day, windows in days.items():
@@ -542,22 +545,17 @@ class ConstraintEngine:
                     else:
                         runs.append([window])
                 for run in runs:
-                    counts = {kind: 0 for kind in CONSECUTIVE_CLASS_LIMIT}
-                    for window in run:
-                        counts[windows[window][0]] += 1
-                    over = [
-                        kind
-                        for kind, limit in CONSECUTIVE_CLASS_LIMIT.items()
-                        if counts[kind] > limit
-                    ]
+                    first = run[0][0]
+                    last = max(w[1] for w in run)
                     classes = [entry for w in run for entry in windows[w][1]]
-                    if not over or not candidate_ids & {c for c, _, _ in classes}:
+                    # Exactly the limit counts, as for a Block's run.
+                    if (
+                        datetime.combine(day_zero, last)
+                        - datetime.combine(day_zero, first)
+                        < limit
+                        or not candidate_ids & {c for c, _, _ in classes}
+                    ):
                         continue
-                    kinds = " and ".join(
-                        f"{counts[kind]} "
-                        f"{'lectures' if kind is SubjectType.LEC else 'labs'}"
-                        for kind in over
-                    )
                     labels = list(dict.fromkeys(label for _, _, label in classes))
                     conflicts.append(
                         ConstraintConflict(
@@ -565,10 +563,10 @@ class ConstraintEngine:
                             resource_key=(str(faculty_id), day),
                             class_ids=tuple(c for c, _, _ in classes),
                             time_slot_ids=tuple(s for _, s, _ in classes),
-                            message=f"Faculty {names[faculty_id]} teaches {kinds} "
-                            f"back to back on {day} "
-                            f"{run[0][0]:%H:%M}-{max(w[1] for w in run):%H:%M}; "
-                            "the limit is 3 lectures or 2 labs in a row: "
+                            message=f"Faculty {names[faculty_id]} teaches back to "
+                            f"back on {day} {first:%H:%M}-{last:%H:%M}; a "
+                            "teacher's classes in a row must total less than "
+                            f"{problem.limits.back_to_back_limit_hours} hours: "
                             f"{', '.join(labels)}.",
                         )
                     )

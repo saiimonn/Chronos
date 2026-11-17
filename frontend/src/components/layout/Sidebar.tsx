@@ -9,6 +9,7 @@ import {
   BookOpen,
   Landmark,
   Shield,
+  ShieldCheck,
   CalendarRange,
   Archive,
   FileUp,
@@ -62,6 +63,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "Administration",
     items: [
+      { to: "/hard-constraints", icon: ShieldCheck, label: "Hard Constraints", adminOnly: true },
       { to: "/ga-configuration", icon: SlidersHorizontal, label: "GA Configuration", adminOnly: true },
       { to: "/evaluations", icon: FlaskConical, label: "GA Evaluation", adminOnly: true },
       { to: "/users", icon: UserCog, label: "Users", adminOnly: true },

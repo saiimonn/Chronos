@@ -305,7 +305,7 @@ def analyze_readiness(problem: SchedulingProblem) -> ReadinessReport:
         }
         required = sum(units_by_offering.values())
         available = sum(
-            member.max_workload
+            problem.limits.max_workload(member)
             for member in teaching
         )
         if required > available:

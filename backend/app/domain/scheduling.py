@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import time, timedelta
 from enum import StrEnum
@@ -97,6 +97,59 @@ FULL_TIME_MAX_WORKLOAD = 24
 
 
 @dataclass(frozen=True, slots=True)
+class ConstraintLimits:
+    """Numeric limits of the hard constraints, set on the Hard Constraints page.
+
+    The defaults are the department's standing rules. A saved version is copied
+    into each problem, so the validator and a queued GA run use the limits that
+    were active when the problem was built.
+    """
+
+    full_time_max_units: int = FULL_TIME_MAX_WORKLOAD
+    part_time_max_units: int = PART_TIME_MAX_WORKLOAD
+    # A Block's day (first class start to last class end): the GA aims for the
+    # target and only lengthens it, an hour at a time, up to the limit.
+    block_day_target_hours: int = 8
+    block_day_limit_hours: int = 10
+    # Neither a teacher nor a Block may sit in back-to-back classes this long
+    # (exactly counts). With 1.5h lectures and 2.5h labs, 6 hours allows at
+    # most 3 lectures or 2 labs in a row.
+    back_to_back_limit_hours: int = 6
+
+    def __post_init__(self) -> None:
+        for name in self.__slots__:
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be at least 1")
+        if self.part_time_max_units > self.full_time_max_units:
+            raise ValueError("part_time_max_units must not exceed full_time_max_units")
+        if not 1 <= self.block_day_target_hours <= self.block_day_limit_hours <= 24:
+            raise ValueError(
+                "block_day_target_hours must not exceed block_day_limit_hours, "
+                "which must not exceed 24"
+            )
+        if self.back_to_back_limit_hours > self.block_day_limit_hours:
+            raise ValueError(
+                "back_to_back_limit_hours must not exceed block_day_limit_hours"
+            )
+
+    @classmethod
+    def from_saved(cls, value: "Mapping[str, object] | None") -> "ConstraintLimits":
+        """Limits from a saved version or job payload. Missing fields take the
+        defaults; fields from earlier versions are dropped or renamed."""
+        saved = dict(value or {})
+        saved.pop("max_consecutive_lectures", None)
+        saved.pop("max_consecutive_labs", None)
+        if "block_run_limit_hours" in saved:
+            saved["back_to_back_limit_hours"] = saved.pop("block_run_limit_hours")
+        return cls(**saved)
+
+    def max_workload(self, member: "FacultyDTO") -> int:
+        return (
+            self.full_time_max_units if member.is_full_time else self.part_time_max_units
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class FacultyDTO:
     faculty_id: UUID
     full_name: str
@@ -115,10 +168,6 @@ class FacultyDTO:
     # Per-day overrides of availability_mask, e.g. "MON:0110;FRI:1000"; a day
     # left out uses availability_mask. Decoded by AvailabilityMaskCodec.weekly.
     day_availability_masks: str = ""
-
-    @property
-    def max_workload(self) -> int:
-        return FULL_TIME_MAX_WORKLOAD if self.is_full_time else PART_TIME_MAX_WORKLOAD
 
     def can_teach(self, subject: "SubjectDTO") -> bool:
         """False when a hard teaching restriction bars this subject."""
@@ -340,6 +389,7 @@ class SchedulingProblem:
     # Placement the partner LAB already holds, by this problem's Offering. A
     # per-Block run must use its time slot and meeting days.
     paired_lab_placements: dict[UUID, "LockedAssignment"] = field(default_factory=dict)
+    limits: ConstraintLimits = field(default_factory=ConstraintLimits)
 
     def enrollment_of(self, offering_id: UUID, scheduled_seats: int) -> int:
         return self.offering_enrollment.get(offering_id, scheduled_seats)
@@ -448,6 +498,7 @@ class BlockGenerationContext:
     # time with a teacher and a room for both; the partner's placements come
     # back as reservations, not as part of this Block's proposal.
     partner_lab_classes: tuple[BlockClassDTO, ...] = ()
+    limits: ConstraintLimits = field(default_factory=ConstraintLimits)
 
     @property
     def selected_problem(self) -> SchedulingProblem:
@@ -484,6 +535,7 @@ class BlockGenerationContext:
                 if class_id in selected_class_ids or partner_id in selected_class_ids
             },
             paired_lab_placements=self.paired_lab_placements(),
+            limits=self.limits,
         )
 
     def paired_lab_placements(self) -> dict[UUID, "LockedAssignment"]:

@@ -16,7 +16,10 @@ from app.domain import (
 )
 from app.domain.meeting_patterns import meeting_end, pattern_weekdays
 from app.services.ga import GAConfig, GAEngine, GeneSampler
-from app.services.ga.operators import BLOCK_DAY_SPAN_MINUTES, BLOCK_RUN_LIMIT_MINUTES
+from app.domain import ConstraintLimits
+
+BLOCK_DAY_SPAN_MINUTES = ConstraintLimits().block_day_target_hours * 60
+BLOCK_RUN_LIMIT_MINUTES = ConstraintLimits().back_to_back_limit_hours * 60
 from app.services.jobs import encode_block_ga_payload, run_ga
 from app.services.validation import ScheduleValidator
 from app.tests.support.ga import GA_TERM_ID, SECTION_LECTURE_ID, make_ga_problem

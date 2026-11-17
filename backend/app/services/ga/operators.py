@@ -9,6 +9,7 @@ because they draw from the ``random`` module globals.
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from datetime import time
+from functools import partial
 from random import Random
 from uuid import UUID
 
@@ -41,21 +42,20 @@ _GENE_SWAP_PROBABILITY = 0.5
 # other legal teacher reachable, so a preference never blocks an assignment
 # and never crowds one teacher past their load on every draw.
 PREFERRED_FACULTY_PROBABILITY = 0.75
-# Longest a Block's day may run, first class start to last class end. Every
-# Block gets one fixed window of this length and its Offerings only draw start
-# slots inside it, so sampling, mutation, crossover and repair can never build
-# a longer day. This narrows the search space like an availability mask does;
-# fitness F(C) = <A, -H, P> and the hard constraints are unchanged.
-BLOCK_DAY_SPAN_MINUTES = 8 * 60
-# A Block may not sit through this long of back-to-back classes (exactly 6h
-# counts). Each Block's window keeps one break slot free so the stretches
-# before and after it both stay shorter. The validator flags any run that
-# still reaches it (BLOCK_CONSECUTIVE_EXCEEDED), outside the GA's H(C).
-BLOCK_RUN_LIMIT_MINUTES = 6 * 60
-# The longest a Block's day may ever run. A run that cannot place every class
-# in 8 hours is retried up to this, and a class no teacher can hold inside
-# its Block's window may stretch past the window only as far as this allows.
-BLOCK_DAY_SPAN_LIMIT_MINUTES = 10 * 60
+# Block day limits come from problem.limits (ConstraintLimits), set on the
+# Hard Constraints page:
+# - block_day_target_hours: every Block gets one fixed window of this length
+#   and its Offerings only draw start slots inside it, so sampling, mutation,
+#   crossover and repair can never build a longer day. This narrows the search
+#   space like an availability mask does; fitness F(C) = <A, -H, P> and the
+#   hard constraints are unchanged.
+# - back_to_back_limit_hours: a Block may not sit through this long of
+#   back-to-back classes (exactly counts). Each window keeps one break slot
+#   free so the stretches before and after it both stay shorter. The validator
+#   flags any run that still reaches it (BLOCK_CONSECUTIVE_EXCEEDED).
+# - block_day_limit_hours: the longest a Block's day may ever run. A run that
+#   cannot place every class at the target is retried up to this, and a class
+#   no teacher can hold inside its window may stretch only this far.
 
 # (window start, window end, break start, break end) in minutes since midnight.
 DayWindow = tuple[int, int, int, int]
@@ -71,13 +71,13 @@ def _fits(window: DayWindow, start: int, end: int) -> bool:
     return low <= start and end <= high and (end <= rest_start or start >= rest_end)
 
 
-def _fits_stretched(window: DayWindow, start: int, end: int) -> bool:
+def _fits_stretched(window: DayWindow, start: int, end: int, *, limit: int) -> bool:
     """Off the window's break, and keeping the Block's day, whatever of the
-    window it uses, within BLOCK_DAY_SPAN_LIMIT_MINUTES."""
+    window it uses, within ``limit`` minutes."""
     low, high, rest_start, rest_end = window
     return (
-        start >= high - BLOCK_DAY_SPAN_LIMIT_MINUTES
-        and end <= low + BLOCK_DAY_SPAN_LIMIT_MINUTES
+        start >= high - limit
+        and end <= low + limit
         # A window without a break marks it as empty (rest_start == rest_end).
         and (rest_start == rest_end or end <= rest_start or start >= rest_end)
     )
@@ -104,7 +104,11 @@ class GeneSampler:
         codec = availability_codec or AvailabilityMaskCodec()
         # The Block day's length; a run that cannot place every class at
         # 8 hours may be retried longer (see app.services.jobs.handlers).
-        self._day_span = day_span_minutes or BLOCK_DAY_SPAN_MINUTES
+        self._day_span = day_span_minutes or problem.limits.block_day_target_hours * 60
+        self._run_limit = problem.limits.back_to_back_limit_hours * 60
+        self._fits_stretched = partial(
+            _fits_stretched, limit=problem.limits.block_day_limit_hours * 60
+        )
         self._config = config
         self._codec = ChromosomeCodec(problem)
         self._offering_ids = self._codec.offering_ids
@@ -258,8 +262,9 @@ class GeneSampler:
         problem: SchedulingProblem,
         locked_assignments: Sequence[LockedAssignment] = (),
     ) -> None:
-        """Narrow each Offering's start slots to its Blocks' 8-hour window,
-        minus one short break that keeps every back-to-back run under 6 hours.
+        """Narrow each Offering's start slots to its Blocks' day window (8 hours
+        by default), minus one short break that keeps every back-to-back run
+        under the Block run limit (6 hours by default).
 
         Blocks that share an Offering share a window. Each group takes the
         window that keeps the most of its Offerings placeable, then the one
@@ -312,7 +317,7 @@ class GeneSampler:
             for chain in chains:
                 first = chain[0][0]
                 last = max(end for _, end in chain)
-                if last - first < BLOCK_RUN_LIMIT_MINUTES:
+                if last - first < self._run_limit:
                     continue
                 # Every break that leaves both sides under the limit, so
                 # Blocks sharing a window can rest at different times.
@@ -320,8 +325,8 @@ class GeneSampler:
                     (low, high, rest, rest + step)
                     for rest in starts
                     if first < rest < last
-                    and rest - first < BLOCK_RUN_LIMIT_MINUTES
-                    and last - (rest + step) < BLOCK_RUN_LIMIT_MINUTES
+                    and rest - first < self._run_limit
+                    and last - (rest + step) < self._run_limit
                 ]
                 for option in options:
                     before, after = option[2] - first, last - option[3]
@@ -415,7 +420,10 @@ class GeneSampler:
                 for other_days, other_start, other_end in busy.get(key, ())
             )
 
-        capacity = {member.faculty_id: member.max_workload for member in problem.faculty}
+        capacity = {
+            member.faculty_id: problem.limits.max_workload(member)
+            for member in problem.faculty
+        }
         units = {s.subject_code: s.units for s in problem.subjects}
         subject_code = {c.class_id: c.subject_code for c in problem.classes}
 
@@ -539,7 +547,7 @@ class GeneSampler:
                     f for f in self._faculty_pools[offering_id] if narrowed[f]
                 )
                 # No teacher can hold it inside the window: let it out of the
-                # window, but only as far as a BLOCK_DAY_SPAN_LIMIT_MINUTES
+                # window, but only as far as a block_day_limit_hours
                 # day, and never across the break. Past that it stays
                 # unplaced for the administrator to decide.
                 if not faculty_pool:
@@ -547,7 +555,7 @@ class GeneSampler:
                         faculty_id: tuple(
                             slot_id
                             for slot_id in self._time_slot_pools[(offering_id, faculty_id)]
-                            if _fits_stretched(window, *single[slot_id])
+                            if self._fits_stretched(window, *single[slot_id])
                         )
                         for faculty_id in pool_keys.get(offering_id, ())
                     }
@@ -674,7 +682,7 @@ class GeneSampler:
                         and (
                             offering_id not in self._day_windows
                             or (
-                                _fits_stretched
+                                self._fits_stretched
                                 if offering_id in self._stretched
                                 else _fits
                             )(

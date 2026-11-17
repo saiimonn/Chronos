@@ -1,6 +1,7 @@
 """CHR-31 / CHR-WORKER-001 lossless job-boundary JSON codecs."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ from app.domain import (
     BlockClassDTO,
     BlockGenerationContext,
     BlockSectionDTO,
+    ConstraintLimits,
     CourseProgramDTO,
     FacultyDTO,
     LockedAssignment,
@@ -236,7 +238,17 @@ def encode_scheduling_problem(problem: SchedulingProblem) -> JsonObject:
             for offering_id, block_ids in problem.offering_block_ids.items()
         },
         "lab_partners": _encode_lab_partners(problem.lab_partners),
+        "limits": encode_constraint_limits(problem.limits),
     }
+
+
+def encode_constraint_limits(limits: ConstraintLimits) -> JsonObject:
+    return asdict(limits)
+
+
+def decode_constraint_limits(value: Mapping[str, Any] | None) -> ConstraintLimits:
+    # Payloads queued before limits were configurable use the standing rules.
+    return ConstraintLimits.from_saved(value)
 
 
 def _encode_lab_partners(partners: Mapping[UUID, UUID]) -> JsonObject:
@@ -309,6 +321,7 @@ def decode_scheduling_problem(value: Mapping[str, Any]) -> SchedulingProblem:
         ),
         offering_block_ids=offering_block_ids,
         lab_partners=_decode_lab_partners(value),
+        limits=decode_constraint_limits(value.get("limits")),
     )
 
 
@@ -637,6 +650,7 @@ def encode_block_generation_context(context: BlockGenerationContext) -> JsonObje
                 for offering_id, seats in context.offering_enrollment.items()
             },
             "lab_partners": _encode_lab_partners(context.lab_partners),
+            "limits": encode_constraint_limits(context.limits),
         },
     }
 
@@ -722,6 +736,7 @@ def decode_block_generation_context(value: Mapping[str, Any]) -> BlockGeneration
             for offering_id, seats in ctx.get("offering_enrollment", {}).items()
         },
         lab_partners=_decode_lab_partners(ctx),
+        limits=decode_constraint_limits(ctx.get("limits")),
     )
 
 

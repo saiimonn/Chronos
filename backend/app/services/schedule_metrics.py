@@ -239,8 +239,9 @@ def _faculty_metrics(problem: SchedulingProblem, sessions: list[_Session]) -> Fa
         idle_by_day.append(
             sum(max(0, b[0] - a[1]) for a, b in zip(items, items[1:])) / 60
         )
+    cap = {m.faculty_id: problem.limits.max_workload(m) for m in active}
     teaching = [member for member in active if load.get(member.faculty_id)]
-    ratios = [load[m.faculty_id] / m.max_workload for m in teaching if m.max_workload]
+    ratios = [load[m.faculty_id] / cap[m.faculty_id] for m in teaching]
     mean_ratio = mean(ratios) if ratios else None
     cv = pstdev(ratios) / mean_ratio if ratios and mean_ratio else None
     preferring_subjects = {
@@ -258,11 +259,11 @@ def _faculty_metrics(problem: SchedulingProblem, sessions: list[_Session]) -> Fa
         faculty_teaching=len(teaching),
         load=Ratio(
             sum(load.get(m.faculty_id, 0) for m in active),
-            sum(m.max_workload for m in active),
+            sum(cap.values()),
         ),
         mean_load_ratio=mean_ratio,
         load_cv=cv,
-        overloaded=sum(1 for m in active if load.get(m.faculty_id, 0) > m.max_workload),
+        overloaded=sum(1 for m in active if load.get(m.faculty_id, 0) > cap[m.faculty_id]),
         preference=Ratio(len(satisfied), len(with_preference)),
         mean_teaching_days=mean(days_by_member.values()) if days_by_member else None,
         mean_idle_hours_per_day=mean(idle_by_day) if idle_by_day else None,
