@@ -20,10 +20,6 @@ from app.domain.meeting_patterns import (
 )
 from app.services.validation.engine import ConstraintEngine, ConstraintEvaluationError
 
-# A Block may not sit in back-to-back classes this long; exactly 6h counts.
-BLOCK_RUN_LIMIT = timedelta(hours=6)
-
-
 class ScheduleValidator:
     def __init__(self, constraint_engine: ConstraintEngine | None = None):
         self._constraint_engine = constraint_engine or ConstraintEngine()
@@ -53,7 +49,7 @@ class ScheduleValidator:
         finalized schedule keeps the past teachers it was approved with.
 
         ``flag_long_block_runs`` reports a Block sitting in back-to-back classes
-        for 6 hours or more on one day. Only schedules being built or edited
+        for the Block run limit (6 hours by default) or more on one day. Only schedules being built or edited
         opt in; historical captures may legitimately hold longer runs.
         """
         if candidate.term_id != problem.term.term_id:
@@ -195,6 +191,7 @@ class ScheduleValidator:
                 meetings.setdefault((section.block_id, str(weekday)), []).append(
                     (start, end, assignment)
                 )
+        run_limit = timedelta(hours=problem.limits.block_run_limit_hours)
         conflicts = []
         for (block_id, weekday), entries in meetings.items():
             runs: list[list[tuple]] = []
@@ -205,7 +202,7 @@ class ScheduleValidator:
                     runs.append([entry])
             for run in runs:
                 first, last = run[0][0], max(e[1] for e in run)
-                if last - first < BLOCK_RUN_LIMIT:
+                if last - first < run_limit:
                     continue
                 block_name = sections[run[0][2].class_id].block_name
                 conflicts.append(
@@ -217,7 +214,8 @@ class ScheduleValidator:
                         message=(
                             f"{block_name} has back-to-back classes on {weekday} "
                             f"{first:%H:%M}-{last:%H:%M}; a Block's classes in a "
-                            "row must total less than 6 hours."
+                            "row must total less than "
+                            f"{problem.limits.block_run_limit_hours} hours."
                         ),
                     )
                 )

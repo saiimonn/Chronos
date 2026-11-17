@@ -4,7 +4,9 @@ from dataclasses import replace
 
 from app.domain import SubjectDTO, SubjectType
 from app.services.ga import GAConfig, GAEngine
-from app.services.ga.operators import BLOCK_DAY_SPAN_LIMIT_MINUTES
+from app.domain import ConstraintLimits
+
+BLOCK_DAY_SPAN_LIMIT_MINUTES = ConstraintLimits().block_day_limit_hours * 60
 from app.tests.unit.test_block_day_window import _wide_grid_problem
 
 # Slots: 07:30, 09:00, ... 19:30 (nine 1.5h lectures).

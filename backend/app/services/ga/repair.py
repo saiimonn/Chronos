@@ -142,7 +142,8 @@ class _ClashScreen:
         sections = {section.class_id: section for section in problem.classes}
         units = {subject.subject_code: subject.units for subject in problem.subjects}
         self._max_workload = {
-            member.faculty_id: member.max_workload for member in problem.faculty
+            member.faculty_id: problem.limits.max_workload(member)
+            for member in problem.faculty
         }
         self._cohorts = {sections[class_id].cohort_key for class_id in class_ids}
         # Two Blocks of one cohort in the same session always overlap.

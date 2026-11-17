@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-from app.domain import CandidateSchedule
+from app.domain import CandidateSchedule, ConstraintLimits
 from app.services.arm.mining import CandidateRuleSet, RuleMiner
 from app.services.arm.preprocessing import (
     HistoricalTerm,
@@ -20,7 +20,6 @@ from app.services.arm.preprocessing import (
 )
 from app.services.ga.day_balance import DEFAULT_DAY_BALANCE_WEIGHT
 from app.services.ga.engine import GAEngine
-from app.services.ga.operators import BLOCK_DAY_SPAN_LIMIT_MINUTES
 from app.services.ga.fitness import ZeroHistoricalAttainmentScorer
 from app.services.ga.metrics import GARunMetrics
 from app.services.ga.rule_scoring import SCORING_POLICY, RuleBackedHistoricalScorer
@@ -115,9 +114,16 @@ def _encode_candidate(candidate: CandidateSchedule) -> JsonObject:
 
 
 _PUBLISHED_SECONDS = "published_attempt_processing_seconds"
-# Block day lengths a per-Block run tries, in order: 8 hours, then longer
-# only when a shorter day cannot hold every class without a conflict.
-BLOCK_DAY_SPAN_RETRIES = (8 * 60, 9 * 60, BLOCK_DAY_SPAN_LIMIT_MINUTES)
+
+
+def block_day_span_retries(limits: ConstraintLimits) -> tuple[int, ...]:
+    """Block day lengths a per-Block run tries, in minutes: the target, then an
+    hour longer at a time up to the limit, only when a shorter day cannot hold
+    every class without a conflict."""
+    return tuple(
+        hours * 60
+        for hours in range(limits.block_day_target_hours, limits.block_day_limit_hours + 1)
+    )
 
 
 def run_ga(payload: Mapping[str, Any]) -> JsonObject:
@@ -188,12 +194,12 @@ def _run_ga_block(payload: Mapping[str, Any]) -> JsonObject:
         else ZeroHistoricalAttainmentScorer()
     )
     config = decode_ga_config(payload["config"])
-    # The Block day is held to 8 hours. Only when a run cannot place every
+    # The Block day is held to its target (8 hours by default). Only when a run cannot place every
     # class without a conflict is it retried with a longer day, and the first
     # complete, conflict-free result wins; failing that, the one placing the
     # most classes, then with the fewest conflicts.
     result = None
-    for span_minutes in BLOCK_DAY_SPAN_RETRIES:
+    for span_minutes in block_day_span_retries(context.limits):
         attempt = GAEngine.from_block_context(
             context,
             config,

@@ -35,6 +35,7 @@ from app.repositories.mappers import (
     map_term,
     map_time_slot,
 )
+from app.services.hard_constraints import active_constraint_limits
 from app.repositories.protocols import (
     BaseScheduleNotFoundError,
     BlockGenerationContextNotFoundError,
@@ -109,6 +110,7 @@ class SQLAlchemySchedulingProblemProvider:
             time_slots=tuple(map_time_slot(item) for item in time_slots),
             offering_block_ids=build_offering_block_ids(mapped_classes),
             lab_partners=_lab_partners(mapped_classes, mapped_subjects),
+            limits=active_constraint_limits(self._session),
         )
 
     def _load_referenced(
@@ -242,6 +244,7 @@ class SQLAlchemyBlockGenerationContextProvider:
             base_schedule_id=base_schedule_id,
             offering_enrollment=build_offering_enrollment(mapped_all_classes),
             lab_partners=_lab_partners(mapped_all_classes, mapped_subjects),
+            limits=active_constraint_limits(self._session),
         )
 
     def _load_locked_assignments(

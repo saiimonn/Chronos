@@ -13,6 +13,7 @@ from uuid import UUID
 import pytest
 
 from app.domain import (
+    ConstraintLimits,
     Assignment,
     BlockClassDTO,
     CandidateSchedule,
@@ -40,7 +41,7 @@ from app.domain.meeting_patterns import (
 )
 from app.schemas.catalog import SubjectCreate, SubjectUpdate
 from app.services.ga.config import GAConfig, validate_meeting_day_patterns
-from app.services.ga import operators
+
 from app.services.ga.operators import GeneSampler
 from app.services.ga.rule_scoring import RuleBackedHistoricalScorer
 from app.services.jobs.codecs import (
@@ -54,11 +55,10 @@ FACULTY_ID = UUID("00000000-0000-0000-0000-0000000000a2")
 OTHER_FACULTY_ID = UUID("00000000-0000-0000-0000-0000000000a3")
 CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a4")
 OTHER_CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a5")
-@pytest.fixture
-def whole_day_blocks(monkeypatch):
-    """Lift the 8-hour Block day and 6-hour run limit so the grid stays whole."""
-    monkeypatch.setattr(operators, "BLOCK_DAY_SPAN_MINUTES", 24 * 60)
-    monkeypatch.setattr(operators, "BLOCK_RUN_LIMIT_MINUTES", 24 * 60)
+# Lifts the 8-hour Block day and 6-hour run limit so the grid stays whole.
+WHOLE_DAY = ConstraintLimits(
+    block_day_target_hours=24, block_day_limit_hours=24, block_run_limit_hours=24
+)
 
 
 SLOT_0730 = UUID("00000000-0000-0000-0000-0000000000b1")
@@ -310,9 +310,8 @@ def test_summer_term_samples_only_mtwth():
     assert {gene.meeting_days for gene in genes} == {"MTWTh"}
 
 
-@pytest.mark.usefixtures("whole_day_blocks")
 def test_friday_only_genes_start_where_the_second_session_fits():
-    sampler = GeneSampler(_problem(1), _config(("F",)))
+    sampler = GeneSampler(replace(_problem(1), limits=WHOLE_DAY), _config(("F",)))
     offering_id = sampler.offering_ids[0]
     assert sampler.time_slot_pool(offering_id, FACULTY_ID, "F") == (SLOT_0730,)
     assert sampler.time_slot_pool(offering_id, FACULTY_ID, "MW") == (
@@ -360,14 +359,13 @@ def test_subject_api_accepts_only_semester_patterns():
     ).allowed_room_codes == ["LB 461", "LB 470"]
 
 
-@pytest.mark.usefixtures("whole_day_blocks")
 def test_weekend_pattern_is_drawn_only_for_a_subject_that_prefers_it():
     config = _config(("MW", "TTh", "F"))
-    plain = GeneSampler(_problem(1), config)
+    plain = GeneSampler(replace(_problem(1), limits=WHOLE_DAY), config)
     assert all(
         "FSa" not in plain.meeting_day_patterns(o) for o in plain.offering_ids
     )
-    saturday = GeneSampler(_prefer(_problem(1), "Sa"), config)
+    saturday = GeneSampler(replace(_prefer(_problem(1), "Sa"), limits=WHOLE_DAY), config)
     rng = Random(4)
     for offering_id in saturday.offering_ids:
         assert saturday.day_pattern_passes(offering_id) == (
@@ -377,7 +375,7 @@ def test_weekend_pattern_is_drawn_only_for_a_subject_that_prefers_it():
         for _ in range(20):
             assert saturday.sample_gene(offering_id, rng).meeting_days == "Sa"
     # Summer packs every class into MTWTh, preference or not.
-    summer = GeneSampler(_prefer(_problem(3), "FSa"), config)
+    summer = GeneSampler(replace(_prefer(_problem(3), "FSa"), limits=WHOLE_DAY), config)
     for offering_id in summer.offering_ids:
         assert summer.meeting_day_patterns(offering_id) == ("MTWTh",)
 
@@ -410,16 +408,15 @@ def test_first_choice_is_the_preference_else_the_two_day_patterns():
     assert first_choice_patterns(("MTWTh",), ("F",)) == ("MTWTh",)
 
 
-@pytest.mark.usefixtures("whole_day_blocks")
 def test_friday_goes_only_to_subjects_that_prefer_it():
     config = _config(("MW", "TTh", "F"))
-    plain = GeneSampler(_problem(1), config)
+    plain = GeneSampler(replace(_problem(1), limits=WHOLE_DAY), config)
     rng = Random(5)
     for offering_id in plain.offering_ids:
         for _ in range(30):
             assert plain.sample_gene(offering_id, rng).meeting_days in ("MW", "TTh")
 
-    friday = GeneSampler(_prefer(_problem(1), "F"), config)
+    friday = GeneSampler(replace(_prefer(_problem(1), "F"), limits=WHOLE_DAY), config)
     for offering_id in friday.offering_ids:
         for _ in range(30):
             gene = friday.sample_gene(offering_id, rng)

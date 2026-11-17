@@ -93,7 +93,6 @@ _CONFLICT_ORDER = {
 
 # The most classes of one kind a faculty member may teach back to back on one
 # day. Classes are back to back when one starts as the previous one ends.
-CONSECUTIVE_CLASS_LIMIT = {SubjectType.LEC: 3, SubjectType.LAB: 2}
 
 
 _DAY_ORDER = ("M", "T", "W", "Th", "F", "Sa", "Su")
@@ -338,7 +337,7 @@ class ConstraintEngine:
                 for item in faculty_assignments
             }
             workload = sum(units_by_offering.values())
-            max_workload = faculty_assignments[0].faculty.max_workload
+            max_workload = problem.limits.max_workload(faculty_assignments[0].faculty)
             if workload > max_workload:
                 conflicts.append(
                     ConstraintConflict(
@@ -542,13 +541,13 @@ class ConstraintEngine:
                     else:
                         runs.append([window])
                 for run in runs:
-                    counts = {kind: 0 for kind in CONSECUTIVE_CLASS_LIMIT}
+                    counts = {kind: 0 for kind in SubjectType}
                     for window in run:
                         counts[windows[window][0]] += 1
                     over = [
                         kind
-                        for kind, limit in CONSECUTIVE_CLASS_LIMIT.items()
-                        if counts[kind] > limit
+                        for kind in (SubjectType.LEC, SubjectType.LAB)
+                        if counts[kind] > problem.limits.consecutive_limit(kind)
                     ]
                     classes = [entry for w in run for entry in windows[w][1]]
                     if not over or not candidate_ids & {c for c, _, _ in classes}:
@@ -568,7 +567,9 @@ class ConstraintEngine:
                             message=f"Faculty {names[faculty_id]} teaches {kinds} "
                             f"back to back on {day} "
                             f"{run[0][0]:%H:%M}-{max(w[1] for w in run):%H:%M}; "
-                            "the limit is 3 lectures or 2 labs in a row: "
+                            f"the limit is {problem.limits.max_consecutive_lectures} "
+                            f"lectures or {problem.limits.max_consecutive_labs} "
+                            "labs in a row: "
                             f"{', '.join(labels)}.",
                         )
                     )

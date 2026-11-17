@@ -830,6 +830,32 @@ export interface GAConfigurationVersionList {
   items: GAConfigurationVersion[];
 }
 
+export interface ConstraintLimits {
+  full_time_max_units: number;
+  part_time_max_units: number;
+  max_consecutive_lectures: number;
+  max_consecutive_labs: number;
+  block_day_target_hours: number;
+  block_day_limit_hours: number;
+  block_run_limit_hours: number;
+}
+
+export interface HardConstraints {
+  version: number | null;
+  limits: ConstraintLimits;
+  defaults: ConstraintLimits;
+  created_at: string | null;
+  created_by_user_id: string | null;
+}
+
+export interface HardConstraintsVersion {
+  version: number;
+  is_active: boolean;
+  limits: ConstraintLimits;
+  created_at: string;
+  created_by_username: string | null;
+}
+
 export interface JobAcceptedResponse {
   job_id: string;
   kind: "ga" | "arm" | "evaluation";
@@ -1425,6 +1451,11 @@ export const api = {
     request<GAConfigurationVersionList>("/ga-configuration/versions"),
   saveGAConfiguration: (config: GAConfig) =>
     request<GAConfiguration>("/ga-configuration", { method: "PUT", body: config }),
+  getHardConstraints: () => request<HardConstraints>("/hard-constraints"),
+  listHardConstraintVersions: () =>
+    request<{ items: HardConstraintsVersion[] }>("/hard-constraints/versions"),
+  saveHardConstraints: (limits: ConstraintLimits) =>
+    request<HardConstraints>("/hard-constraints", { method: "PUT", body: limits }),
   submitGAJob: (data: SubmitGAJobRequest) =>
     request<JobAcceptedResponse>("/jobs/ga", { method: "POST", body: data }),
   getGAJob: (jobId: string) => request<GAJobStatusResponse>(`/jobs/${jobId}`),

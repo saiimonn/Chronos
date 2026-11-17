@@ -13,6 +13,7 @@ import RoomsPage from "./pages/RoomsPage";
 import RosterPage from "./pages/RosterPage";
 import RuleSetsPage from "./pages/RuleSetsPage";
 import GAConfigurationPage from "./pages/GAConfigurationPage";
+import HardConstraintsPage from "./pages/HardConstraintsPage";
 import MatchedEvaluationPage from "./pages/MatchedEvaluationPage";
 import SchedulePage from "./pages/SchedulePage";
 import SubjectsPage from "./pages/SubjectsPage";
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/history" element={<SessionGate><RoleGate requireAdmin><HistoryPage /></RoleGate></SessionGate>} />
           <Route path="/historical-upload" element={<SessionGate><RoleGate requireAdmin><HistoricalUploadPage /></RoleGate></SessionGate>} />
           <Route path="/ga-configuration" element={<SessionGate><RoleGate requireAdmin><GAConfigurationPage /></RoleGate></SessionGate>} />
+          <Route path="/hard-constraints" element={<SessionGate><RoleGate requireAdmin><HardConstraintsPage /></RoleGate></SessionGate>} />
           <Route path="/users" element={<SessionGate><RoleGate requireAdmin><UsersPage /></RoleGate></SessionGate>} />
           <Route path="/evaluations" element={<SessionGate><RoleGate requireAdmin><MatchedEvaluationPage /></RoleGate></SessionGate>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
