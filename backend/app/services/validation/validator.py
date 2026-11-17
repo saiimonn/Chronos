@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from app.domain import (
@@ -14,9 +15,13 @@ from app.domain import (
 from app.domain.meeting_patterns import (
     allowed_meeting_patterns,
     continuation_slots,
+    meeting_end,
+    pattern_weekdays,
 )
 from app.services.validation.engine import ConstraintEngine, ConstraintEvaluationError
 
+# A Block may not sit in back-to-back classes this long; exactly 6h counts.
+BLOCK_RUN_LIMIT = timedelta(hours=6)
 
 
 class ScheduleValidator:
@@ -32,6 +37,7 @@ class ScheduleValidator:
         *,
         require_allowed_patterns: bool = False,
         flag_inactive_faculty: bool = False,
+        flag_long_block_runs: bool = False,
     ) -> ScheduleValidationResult:
         """Validate ``candidate`` against the problem's hard constraints.
 
@@ -45,6 +51,10 @@ class ScheduleValidator:
         as not currently teaching. Only schedules still being built opt in, so
         deactivating a teacher surfaces their classes for reassignment while a
         finalized schedule keeps the past teachers it was approved with.
+
+        ``flag_long_block_runs`` reports a Block sitting in back-to-back classes
+        for 6 hours or more on one day. Only schedules being built or edited
+        opt in; historical captures may legitimately hold longer runs.
         """
         if candidate.term_id != problem.term.term_id:
             raise ConstraintEvaluationError(
@@ -142,6 +152,10 @@ class ScheduleValidator:
             calendar_conflicts.extend(
                 self._inactive_faculty_conflicts(problem, candidate.assignments)
             )
+        if flag_long_block_runs:
+            calendar_conflicts.extend(
+                self._long_block_run_conflicts(problem, candidate.assignments)
+            )
         if calendar_conflicts:
             report = ConstraintReport(
                 tuple(
@@ -157,6 +171,57 @@ class ScheduleValidator:
             unassigned_class_ids=unassigned_ids,
             constraint_report=report,
         )
+
+    @staticmethod
+    def _long_block_run_conflicts(
+        problem: SchedulingProblem, assignments: Sequence
+    ) -> list[ConstraintConflict]:
+        sections = {section.class_id: section for section in problem.classes}
+        slots = {slot.time_slot_id: slot for slot in problem.time_slots}
+        day = datetime.min.date()
+        meetings: dict[tuple[UUID, str], list[tuple]] = {}
+        for assignment in assignments:
+            section = sections.get(assignment.class_id)
+            slot = slots.get(assignment.time_slot_id)
+            if section is None or slot is None or not assignment.meeting_days:
+                continue
+            try:
+                weekdays = pattern_weekdays(assignment.meeting_days)
+            except ValueError:
+                continue  # Reported above as outside the teaching calendar.
+            start = datetime.combine(day, slot.start_time)
+            end = datetime.combine(day, meeting_end(slot, assignment.meeting_days))
+            for weekday in weekdays:
+                meetings.setdefault((section.block_id, str(weekday)), []).append(
+                    (start, end, assignment)
+                )
+        conflicts = []
+        for (block_id, weekday), entries in meetings.items():
+            runs: list[list[tuple]] = []
+            for entry in sorted(entries, key=lambda e: (e[0], e[1])):
+                if runs and entry[0] <= max(e[1] for e in runs[-1]):
+                    runs[-1].append(entry)
+                else:
+                    runs.append([entry])
+            for run in runs:
+                first, last = run[0][0], max(e[1] for e in run)
+                if last - first < BLOCK_RUN_LIMIT:
+                    continue
+                block_name = sections[run[0][2].class_id].block_name
+                conflicts.append(
+                    ConstraintConflict(
+                        code=ConflictCode.BLOCK_CONSECUTIVE_EXCEEDED,
+                        resource_key=(str(block_id), weekday),
+                        class_ids=tuple(e[2].class_id for e in run),
+                        time_slot_ids=tuple(e[2].time_slot_id for e in run),
+                        message=(
+                            f"{block_name} has back-to-back classes on {weekday} "
+                            f"{first:%H:%M}-{last:%H:%M}; a Block's classes in a "
+                            "row must total less than 6 hours."
+                        ),
+                    )
+                )
+        return conflicts
 
     @staticmethod
     def _inactive_faculty_conflicts(

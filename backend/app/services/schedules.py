@@ -974,6 +974,7 @@ def _validate_candidate(
             candidate,
             require_allowed_patterns=True,
             flag_inactive_faculty=flag_inactive_faculty,
+            flag_long_block_runs=True,
         )
     except StaleFacultyMaskError as error:
         # Its message names the member; the generic error below would not.

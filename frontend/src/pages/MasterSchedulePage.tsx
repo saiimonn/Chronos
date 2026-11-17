@@ -1279,16 +1279,34 @@ export default function MasterSchedulePage() {
   }
 
   /**
+   * Other Blocks' proposals still waiting for review, by Block. Generation
+   * already treats them as taken, so the editor must too: otherwise a teacher
+   * or room they hold looks free here and approving both double-books it.
+   */
+  function pendingProposals(blockId: string): [string, NonNullable<BlockRun["preview"]>][] {
+    return Object.entries(runs).flatMap(([id, other]) =>
+      id !== blockId && other.preview && (other.phase === "review" || other.phase === "approving") ? [[id, other.preview]] : []);
+  }
+
+  /**
    * Everything else occupying the week, for the editor: the approved
-   * schedule (what the server checks an edit against) plus the rest of this
-   * Block's own proposal, which replaces its approved classes.
+   * schedule, other Blocks' pending proposals (each replacing its Block's
+   * approved classes), and the rest of this Block's own proposal.
    */
   function occupiedFor(blockId: string, run: BlockRun | null): OccupiedMeeting[] {
     const meetings: OccupiedMeeting[] = [];
+    const pending = pendingProposals(blockId);
+    const replaced = new Set(pending.map(([id]) => id));
     for (const item of assignments) {
-      if (run && item.block_id === blockId) continue;
+      if ((run && item.block_id === blockId) || replaced.has(item.block_id)) continue;
       const meeting = meetingOf(item.class_id, item.block_id, item.subject_code, item.faculty_id, item.room_code, item.meeting_days, item.time_slot_id, item.offering_id);
       if (meeting) meetings.push(meeting);
+    }
+    for (const [otherId, preview] of pending) {
+      for (const item of preview.proposed_assignments) {
+        const meeting = meetingOf(item.class_id, otherId, item.subject_code, item.faculty_id, item.room_code, item.meeting_days, item.time_slot_id, item.offering_id);
+        if (meeting) meetings.push(meeting);
+      }
     }
     for (const item of run?.preview?.proposed_assignments ?? []) {
       const meeting = meetingOf(item.class_id, blockId, item.subject_code, item.faculty_id, item.room_code, item.meeting_days, item.time_slot_id, item.offering_id);
@@ -1307,8 +1325,11 @@ export default function MasterSchedulePage() {
   function loadsFor(blockId: string, run: BlockRun | null, classId: string): Map<string, number> {
     const offeringId = offeringOf(classId, run);
     const skip = (item: { class_id: string; offering_id?: string }) => item.class_id === classId || (offeringId !== undefined && item.offering_id === offeringId);
+    const pending = pendingProposals(blockId);
+    const replaced = new Set(pending.map(([id]) => id));
     return unitsByFaculty([
-      ...assignments.filter((item) => !skip(item) && !(run && item.block_id === blockId)),
+      ...assignments.filter((item) => !skip(item) && !(run && item.block_id === blockId) && !replaced.has(item.block_id)),
+      ...pending.flatMap(([, preview]) => preview.proposed_assignments).filter((item) => !skip(item)),
       ...(run?.preview?.proposed_assignments ?? []).filter((item) => !skip(item)),
     ], unitsOf);
   }

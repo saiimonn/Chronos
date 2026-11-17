@@ -710,6 +710,7 @@ export const CONFLICT_CODE_LABEL: Record<string, string> = {
   FACULTY_INACTIVE: "Instructor no longer teaching",
   FACULTY_CONSECUTIVE_EXCEEDED: "Too many classes in a row",
   ROOM_NOT_ALLOWED: "Room not allowed for subject",
+  BLOCK_CONSECUTIVE_EXCEEDED: "Block in class 6h or more in a row",
 };
 
 export function conflictLabel(code: string): string {
