@@ -443,11 +443,17 @@ class BlockGenerationContext:
     offering_enrollment: dict[UUID, int] = field(default_factory=dict)
     # build_lab_partners over every Block in the Term.
     lab_partners: dict[UUID, UUID] = field(default_factory=dict)
+    # The partner Block's LAB classes when that Block has no placement yet.
+    # The run places them beside this Block's own LABs so each pair gets a
+    # time with a teacher and a room for both; the partner's placements come
+    # back as reservations, not as part of this Block's proposal.
+    partner_lab_classes: tuple[BlockClassDTO, ...] = ()
 
     @property
     def selected_problem(self) -> SchedulingProblem:
-        selected_offering_ids = {item.offering_id for item in self.selected_classes}
-        selected_class_ids = {item.class_id for item in self.selected_classes}
+        run_classes = self.selected_classes + self.partner_lab_classes
+        selected_offering_ids = {item.offering_id for item in run_classes}
+        selected_class_ids = {item.class_id for item in run_classes}
         offering_blocks = (
             {
                 offering_id: block_ids
@@ -455,7 +461,7 @@ class BlockGenerationContext:
                 if offering_id in selected_offering_ids
             }
             if self.offering_block_ids
-            else build_offering_block_ids(self.selected_classes)
+            else build_offering_block_ids(run_classes)
         )
         return SchedulingProblem(
             term=self.term,
@@ -463,7 +469,7 @@ class BlockGenerationContext:
             subjects=self.subjects,
             rooms=self.rooms,
             programs=self.programs,
-            classes=self.selected_classes,
+            classes=run_classes,
             time_slots=self.time_slots,
             offering_block_ids=offering_blocks,
             shared_placements=self.shared_placements(selected_offering_ids),

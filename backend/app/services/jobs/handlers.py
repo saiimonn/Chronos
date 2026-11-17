@@ -215,15 +215,34 @@ def _run_ga_block(payload: Mapping[str, Any]) -> JsonObject:
             and attempt.metrics.combined_hard_conflict_count == 0
         ):
             break
+    # The partner Block's LABs were placed only to keep each pair together:
+    # they are reserved for that Block, not part of this Block's proposal.
+    own_class_ids = {item.class_id for item in context.selected_classes}
+    own = replace(
+        result.candidate,
+        assignments=tuple(
+            item for item in result.candidate.assignments if item.class_id in own_class_ids
+        ),
+    )
+    reserved = replace(
+        result.candidate,
+        assignments=tuple(
+            item
+            for item in result.candidate.assignments
+            if item.class_id not in own_class_ids
+        ),
+    )
     output = _encode_ga_result(
-        _encode_candidate(result.candidate),
+        _encode_candidate(own),
         _encode_candidate_metrics(result.metrics),
         locks_enforced=True,
     )
     # Over 8 hours only when the Block could not be placed in 8.
     output["block_day_span_minutes"] = used_span
+    if context.partner_lab_classes:
+        output["partner_lab_reservations"] = _encode_candidate(reserved)["assignments"]
     output["historical_guidance"] = _guidance_result(
-        guidance, scorer.score(context.selected_problem, result.candidate.assignments)
+        guidance, scorer.score(context.selected_problem, own.assignments)
     )
     return output
 
