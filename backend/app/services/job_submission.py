@@ -67,6 +67,28 @@ class GAContextJobError(ValueError):
         super().__init__(message)
 
 
+def with_partner_lab_classes(
+    context: BlockGenerationContext, problem: Any
+) -> BlockGenerationContext:
+    """Add the partner Block's LAB classes when that Block is not placed yet.
+
+    A paired LAB must meet when its partner does, so whichever Block runs
+    first fixes the time for both. Placing the partner's LABs in the same run
+    keeps that time workable for both Blocks: a teacher and a room for each.
+    A partner already accepted or held by a pending proposal pins the time
+    instead, through its lock.
+    """
+    held = {lock.class_id for lock in context.locked_assignments}
+    by_id = {section.class_id: section for section in problem.classes}
+    partners = tuple(
+        by_id[partner_id]
+        for section in context.selected_classes
+        if (partner_id := context.lab_partners.get(section.class_id)) in by_id
+        and partner_id not in held
+    )
+    return replace(context, partner_lab_classes=partners) if partners else context
+
+
 def add_proposal_locks(
     session: Session,
     context: BlockGenerationContext,
@@ -95,6 +117,9 @@ def add_proposal_locks(
     slot_ids = {slot.time_slot_id for slot in context.time_slots}
     locked_class_ids = {lock.class_id for lock in context.locked_assignments}
     extra: list[LockedAssignment] = []
+    # A partner Block's LABs reserved by another run, held until that Block's
+    # own proposal (which wins) is in the context.
+    reservations: list[tuple[UUID, dict]] = []
     for job_id in context_job_ids:
         job = session.get(ExecutionJob, job_id)
         if job is None:
@@ -128,6 +153,13 @@ def add_proposal_locks(
             rows = [dict(row) for row in context_edits[job_id]]
         if not isinstance(rows, list):
             raise GAContextJobError("A context run has no candidate result.", job_id)
+        reserved = (
+            job.result.get("partner_lab_reservations")
+            if isinstance(job.result, dict)
+            else None
+        )
+        if isinstance(reserved, list):
+            reservations.extend((job_id, row) for row in reserved)
         for row in rows:
             try:
                 class_id = UUID(row["class_id"])
@@ -163,6 +195,41 @@ def add_proposal_locks(
                     units=units.get(section.subject_code, 0),
                 )
             )
+    for job_id, row in reservations:
+        try:
+            class_id = UUID(row["class_id"])
+            faculty_id = UUID(row["faculty_id"])
+            time_slot_id = UUID(row["time_slot_id"])
+            room_code = row.get("room_code") or ""
+            meeting_days = row.get("meeting_days") or ""
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise GAContextJobError(
+                "A context run's reservation is malformed.", job_id
+            ) from None
+        section = classes.get(class_id)
+        # The Block now being generated places its own LABs; a LAB already
+        # accepted or proposed by its own Block keeps that placement.
+        if (
+            section is None
+            or section.block_id == context.selected_block_id
+            or class_id in locked_class_ids
+            or time_slot_id not in slot_ids
+            or not meeting_days
+        ):
+            continue
+        locked_class_ids.add(class_id)
+        extra.append(
+            LockedAssignment(
+                class_id=class_id,
+                faculty_id=faculty_id,
+                time_slot_id=time_slot_id,
+                room_code=room_code,
+                meeting_days=meeting_days,
+                block_id=section.block_id,
+                offering_id=section.offering_id,
+                units=units.get(section.subject_code, 0),
+            )
+        )
     return replace(
         context, locked_assignments=tuple(context.locked_assignments) + tuple(extra)
     )
@@ -375,6 +442,7 @@ class JobSubmissionService:
                     for item in request.context_edits
                 },
             )
+            context = with_partner_lab_classes(context, problem)
 
         report = analyze_readiness(problem)
         if not report.ready:

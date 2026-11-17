@@ -339,6 +339,13 @@ class GeneSampler:
         for blocks in blocks_of.values():
             for block in blocks[1:]:
                 parent[root(block)] = root(blocks[0])
+        # A LAB and its partner placed in the same run meet together, so their
+        # Blocks take one window.
+        for class_id, partner_id in problem.lab_partners.items():
+            if class_id in self._block_of_class and partner_id in self._block_of_class:
+                parent[root(self._block_of_class[partner_id])] = root(
+                    self._block_of_class[class_id]
+                )
 
         fixed = {**problem.paired_lab_placements, **problem.shared_placements}
         free: dict[UUID, list[UUID]] = {}
