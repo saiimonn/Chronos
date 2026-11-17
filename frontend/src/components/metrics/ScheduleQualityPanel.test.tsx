@@ -46,22 +46,40 @@ function renderPanel() {
   return render(<MemoryRouter><ScheduleQualityPanel termId="term-1" /></MemoryRouter>);
 }
 
-it("shows each metric with its evidence kind and source", async () => {
+it("colours each value by its ideal and keeps the detail below it", async () => {
   renderPanel();
   const rooms = await screen.findByRole("article", { name: "Room utilization" });
-  expect(within(rooms).getByText(percent(metrics.rooms[0].utilization, 1))).toBeInTheDocument();
-  expect(within(rooms).getByText("Observed benchmark")).toBeInTheDocument();
-  expect(within(rooms).getByText(/Beyrouthy et al\. \(2009\)/)).toBeInTheDocument();
+  const value = within(rooms).getByText(percent(metrics.rooms[0].utilization, 1));
+  expect(value).toHaveClass("text-secondary");
+  expect(rooms).toHaveAttribute("data-status", "pass");
+  expect(value.nextElementSibling).toHaveTextContent("9 of 10 rooms used");
 
   const completeness = screen.getByRole("article", { name: "Assignment completeness" });
-  expect(within(completeness).getByText("100.0%")).toBeInTheDocument();
-  expect(within(completeness).getByText("Thesis rule")).toBeInTheDocument();
-
-  const load = screen.getByRole("article", { name: "Faculty load" });
-  expect(within(load).getByText("81.8%")).toBeInTheDocument();
-  expect(screen.getByRole("article", { name: "Balanced Block weeks" })).toHaveTextContent("75%");
-  expect(screen.getByText(/https:\/\/doi.org\/10.1057\/palgrave.jors.2602523/)).toBeInTheDocument();
+  expect(within(completeness).getByText("100.0%")).toHaveClass("text-secondary");
+  // 12 of 16 Blocks balanced misses the 100% ideal.
+  const balance = screen.getByRole("article", { name: "Balanced Block weeks" });
+  expect(within(balance).getByText("75%")).toHaveClass("text-error");
+  expect(balance).toHaveAttribute("data-status", "fail");
   expect(api.getScheduleMetrics).toHaveBeenCalledWith("s-1");
+});
+
+it("puts the description, formula and ideal in the help tooltip, with no sources", async () => {
+  renderPanel();
+  const help = await screen.findByRole("button", { name: "About Room utilization" });
+  const tip = document.getElementById(help.getAttribute("aria-describedby") ?? "");
+  expect(tip).toHaveTextContent(/Ideal: 20% or more/);
+  expect(tip).toHaveTextContent(/Formula: Frequency/);
+  expect(screen.queryByText(/Beyrouthy|doi\.org|Sources/)).not.toBeInTheDocument();
+});
+
+it("shows red when a hard conflict remains", async () => {
+  vi.mocked(api.getScheduleMetrics).mockResolvedValue({
+    ...metrics,
+    feasibility: { ...metrics.feasibility, hard_conflict_count: 2, valid: false },
+  });
+  renderPanel();
+  const conflicts = await screen.findByRole("article", { name: "Hard conflicts" });
+  expect(within(conflicts).getByText("2")).toHaveClass("text-error");
 });
 
 it("explains when the term has no master schedule", async () => {
