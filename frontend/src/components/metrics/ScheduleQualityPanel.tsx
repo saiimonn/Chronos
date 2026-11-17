@@ -138,13 +138,6 @@ function MetricGrid({ metrics }: { metrics: ScheduleMetrics }) {
         metrics={metrics}
       />
       <MetricCard
-        label="Hard conflicts"
-        value={String(feasibility.hard_conflict_count)}
-        detail={feasibility.valid ? "Valid schedule: exportable" : "Not yet a valid schedule"}
-        metric="conflicts"
-        metrics={metrics}
-      />
-      <MetricCard
         label="Room utilization"
         value={percent(all?.utilization, 1)}
         detail={`${all?.rooms_used ?? 0} of ${all?.rooms_total ?? 0} rooms used; frequency ${percent(all?.frequency.value, 1)} × occupancy ${percent(all?.occupancy.value, 1)}`}

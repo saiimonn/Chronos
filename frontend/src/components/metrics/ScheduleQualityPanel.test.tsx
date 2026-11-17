@@ -72,14 +72,11 @@ it("puts the description, formula and ideal in the help tooltip, with no sources
   expect(screen.queryByText(/Beyrouthy|doi\.org|Sources/)).not.toBeInTheDocument();
 });
 
-it("shows red when a hard conflict remains", async () => {
-  vi.mocked(api.getScheduleMetrics).mockResolvedValue({
-    ...metrics,
-    feasibility: { ...metrics.feasibility, hard_conflict_count: 2, valid: false },
-  });
+it("has no hard-conflict card: accepted schedules are conflict-free", async () => {
   renderPanel();
-  const conflicts = await screen.findByRole("article", { name: "Hard conflicts" });
-  expect(within(conflicts).getByText("2")).toHaveClass("text-error");
+  await screen.findByRole("article", { name: "Room utilization" });
+  expect(screen.queryByRole("article", { name: "Hard conflicts" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("article")).toHaveLength(5);
 });
 
 it("explains when the term has no master schedule", async () => {

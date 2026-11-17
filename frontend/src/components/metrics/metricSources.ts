@@ -6,7 +6,6 @@ import type { ScheduleMetrics } from "../../api/client";
 
 export type MetricKey =
   | "completeness"
-  | "conflicts"
   | "roomUtilization"
   | "facultyLoad"
   | "dayBalance"
@@ -34,12 +33,6 @@ export const METRIC_HELP: Record<MetricKey, MetricHelp> = {
     formula: "Classes assigned ÷ classes required",
     ideal: "100% (a valid schedule places every class)",
     passes: (m) => atLeast(m.feasibility.completeness, 1),
-  },
-  conflicts: {
-    description: "Clashes the validator finds, such as a teacher, room or Block booked twice at once.",
-    formula: "Count of hard-constraint violations",
-    ideal: "0 (a valid schedule has no hard conflicts)",
-    passes: (m) => m.feasibility.hard_conflict_count === 0,
   },
   roomUtilization: {
     description: "How much of the available room time is used, and how full the rooms are while in use. Seats filled are estimated from Block capacity, since enrolment is not recorded.",
