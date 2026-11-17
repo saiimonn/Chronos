@@ -20,11 +20,9 @@ vi.mock("../hooks/useAuth", () => ({
 const defaults: ConstraintLimits = {
   full_time_max_units: 24,
   part_time_max_units: 17,
-  max_consecutive_lectures: 3,
-  max_consecutive_labs: 2,
   block_day_target_hours: 8,
   block_day_limit_hours: 10,
-  block_run_limit_hours: 6,
+  back_to_back_limit_hours: 6,
 };
 
 const active: HardConstraints = { version: null, limits: defaults, defaults, created_at: null, created_by_user_id: null };
@@ -48,13 +46,13 @@ it("lists every constraint and marks the fixed ones always on", async () => {
 
 it("saves edited limits as a new version", async () => {
   const user = userEvent.setup();
-  const edited = { ...defaults, max_consecutive_lectures: 2 };
+  const edited = { ...defaults, back_to_back_limit_hours: 5 };
   vi.mocked(api.saveHardConstraints).mockResolvedValue({ ...active, version: 1, limits: edited });
   renderPage();
 
-  const lectures = await screen.findByLabelText(/Lectures in a row/);
-  await user.clear(lectures);
-  await user.type(lectures, "2");
+  const maxRun = await screen.findByLabelText(/Max run/);
+  await user.clear(maxRun);
+  await user.type(maxRun, "5");
   await user.click(screen.getByRole("button", { name: /Save as new version/ }));
 
   expect(api.saveHardConstraints).toHaveBeenCalledWith(edited);
@@ -72,5 +70,5 @@ it("explains a refused save", async () => {
 });
 
 it("describes what changed between versions", () => {
-  expect(changedLimits({ ...defaults, block_run_limit_hours: 5 }, defaults)).toEqual(["Run limit: 6 → 5"]);
+  expect(changedLimits({ ...defaults, back_to_back_limit_hours: 5 }, defaults)).toEqual(["Max run: 6 → 5"]);
 });

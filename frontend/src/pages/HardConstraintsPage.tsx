@@ -37,19 +37,10 @@ export const CONSTRAINTS: Constraint[] = [
     ],
   },
   {
-    code: "FACULTY_CONSECUTIVE_EXCEEDED",
-    name: "Teacher back-to-back classes",
-    rule: "A teacher's run of back-to-back classes on one day stays within the limit for each subject type.",
-    limits: [
-      { key: "max_consecutive_lectures", label: "Lectures in a row", unit: "classes" },
-      { key: "max_consecutive_labs", label: "Labs in a row", unit: "classes" },
-    ],
-  },
-  {
-    code: "BLOCK_CONSECUTIVE_EXCEEDED",
-    name: "Block back-to-back run",
-    rule: "A Block's back-to-back classes on one day must total less than the limit.",
-    limits: [{ key: "block_run_limit_hours", label: "Run limit", unit: "hours" }],
+    code: "CONSECUTIVE_EXCEEDED",
+    name: "Back-to-back classes",
+    rule: "Neither a teacher nor a Block may have back-to-back classes on one day totalling the limit or more. At 6 hours this allows at most 3 lectures or 2 labs in a row.",
+    limits: [{ key: "back_to_back_limit_hours", label: "Max run", unit: "hours" }],
   },
   {
     code: "BLOCK_DAY_LENGTH",
@@ -165,7 +156,7 @@ export default function HardConstraintsPage() {
       if (request !== requestRef.current) return;
       setError(
         caught instanceof ApiError && caught.status === 422
-          ? "Some limits are invalid. Each must be at least 1, the part-time cap at most the full-time cap, the day target at most the day limit (24 hours max), and the run limit at most the day limit. Nothing was saved."
+          ? "Some limits are invalid. Each must be at least 1, the part-time cap at most the full-time cap, the day target at most the day limit (24 hours max), and the back-to-back limit at most the day limit. Nothing was saved."
           : caught instanceof ApiError ? caught.message : "Could not save the hard constraints.",
       );
     } finally {

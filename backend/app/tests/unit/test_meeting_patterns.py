@@ -57,7 +57,7 @@ CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a4")
 OTHER_CLASS_ID = UUID("00000000-0000-0000-0000-0000000000a5")
 # Lifts the 8-hour Block day and 6-hour run limit so the grid stays whole.
 WHOLE_DAY = ConstraintLimits(
-    block_day_target_hours=24, block_day_limit_hours=24, block_run_limit_hours=24
+    block_day_target_hours=24, block_day_limit_hours=24, back_to_back_limit_hours=24
 )
 
 
