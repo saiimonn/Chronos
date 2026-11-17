@@ -555,6 +555,61 @@ export interface ScheduleConflict {
   message: string;
 }
 
+export interface MetricRatio {
+  numerator: number;
+  denominator: number;
+  value: number | null;
+}
+
+export interface RoomMetrics {
+  room_type: "all" | "lecture" | "laboratory";
+  rooms_total: number;
+  rooms_used: number;
+  frequency: MetricRatio;
+  occupancy: MetricRatio;
+  utilization: number | null;
+}
+
+export interface ScheduleMetrics {
+  schedule_id: string;
+  feasibility: {
+    required_class_count: number;
+    assigned_class_count: number;
+    completeness: number | null;
+    hard_conflict_count: number;
+    valid: boolean;
+  };
+  rooms: RoomMetrics[];
+  faculty: {
+    faculty_active: number;
+    faculty_teaching: number;
+    load: MetricRatio;
+    mean_load_ratio: number | null;
+    load_cv: number | null;
+    overloaded: number;
+    preference: MetricRatio;
+    mean_teaching_days: number | null;
+    mean_idle_hours_per_day: number | null;
+  };
+  blocks: {
+    blocks_scheduled: number;
+    mean_spread_hours: number | null;
+    balanced: MetricRatio;
+    mean_idle_hours_per_day: number | null;
+    mean_days_per_week: number | null;
+    max_daily_hours: number | null;
+  };
+  time: {
+    sessions: number;
+    evening: MetricRatio;
+    weekend: MetricRatio;
+    starts_by_slot: { label: string; sessions: number }[];
+    peak_slot_share: number | null;
+  };
+  window_hours_per_day: number;
+  class_days: number;
+}
+
 export interface ScheduleValidation {
   required_class_count: number;
   assigned_class_count: number;
@@ -1444,6 +1499,8 @@ export const api = {
       method: "PATCH",
       body: data,
     }),
+  getScheduleMetrics: (scheduleId: string) =>
+    request<ScheduleMetrics>(`/schedules/${scheduleId}/metrics`),
   validateSchedule: (scheduleId: string) =>
     request<ScheduleValidation>(`/schedules/${scheduleId}/validate`, { method: "POST" }),
   finalizeSchedule: (scheduleId: string) =>
