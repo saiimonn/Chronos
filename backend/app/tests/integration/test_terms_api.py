@@ -113,6 +113,30 @@ def test_selecting_a_term_deactivates_the_incumbent(db_session: Session):
     assert [str(term.term_id) for term in active] == [second["term_id"]]
 
 
+def test_a_new_term_starts_with_no_blocks_when_selected(db_session: Session):
+    # Blocks are never carried over from another term: a new term is empty
+    # until its Blocks are generated or added in Term Setup.
+    client = make_api_client(db_session)
+    old = client.post(
+        "/api/v1/terms", json={"academic_year": "2025-2026", "term_number": 1}
+    ).json()
+    db_session.add(CourseProgram(program_code="BSCS", program_name="Computer Science"))
+    db_session.flush()
+    db_session.add(
+        BlockSection(term_id=old["term_id"], program_code="BSCS", year_level=1, section_letter="A")
+    )
+    db_session.flush()
+    assert client.post(f"/api/v1/terms/{old['term_id']}/select").status_code == 200
+
+    new = client.post(
+        "/api/v1/terms", json={"academic_year": "2025-2026", "term_number": 2}
+    ).json()
+    assert client.post(f"/api/v1/terms/{new['term_id']}/select").status_code == 200
+
+    assert client.get("/api/v1/block-sections", params={"term_id": new["term_id"]}).json()["items"] == []
+    assert len(client.get("/api/v1/block-sections", params={"term_id": old["term_id"]}).json()["items"]) == 1
+
+
 def test_archiving_keeps_a_term_with_dependents_and_hides_it(db_session: Session):
     client = make_api_client(db_session)
     term = client.post(

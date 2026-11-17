@@ -72,6 +72,8 @@ interface ClassEditorProps {
   onClose: () => void;
   /** Says which paired Block moves with this class, when one does. */
   pairNote?: string;
+  /** Where the paired Block takes this subject, for reference. */
+  pairReference?: PairReference;
   /** The term the class is in: the summer term (3) meets MTWTh. */
   termNumber?: number;
 }
@@ -79,7 +81,16 @@ interface ClassEditorProps {
 // The day patterns a class may meet on, as the backend allows them on an
 // edit (domain/meeting_patterns.allowed_meeting_patterns).
 const SEMESTER_PATTERNS = ["MW", "TTh", "FSa", "F", "Sa", "Su"];
-const SUMMER_PATTERNS = ["MTWTh", "FSa", "Sa", "Su"];
+// The summer term meets MTWTh; Friday-only is the one pattern set by hand.
+const SUMMER_PATTERNS = ["MTWTh", "F"];
+
+export interface PairReference {
+  blockName: string;
+  /** "proposal in review", "approved" or "not generated yet". */
+  source: string;
+  /** One line per session: days · time · room · instructor. */
+  sessions: string[];
+}
 
 /** "1h 30m", "3h", "5h". */
 function formatHours(minutes: number): string {
@@ -109,6 +120,7 @@ export default function ClassEditor({
   onSubmit,
   onClose,
   pairNote,
+  pairReference,
   termNumber,
 }: ClassEditorProps) {
   const [facultyId, setFacultyId] = useState(initial.faculty_id);
@@ -410,6 +422,20 @@ export default function ClassEditor({
           />
           <p aria-live="polite" className="text-sm text-on-surface-variant -mt-3 tabular-nums">{meetingSummary}</p>
           {pairNote && <p role="note" className="text-sm text-on-surface-variant">{pairNote}</p>}
+          {pairReference && (
+            <section aria-label={`${pairReference.blockName} schedule for ${subjectCode}`} className="rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-sm">
+              <p className="font-medium">
+                {pairReference.blockName} ({pairReference.source}) takes {subjectCode}:
+              </p>
+              {pairReference.sessions.length > 0 ? (
+                <ul className="mt-1 space-y-0.5 text-on-surface-variant tabular-nums">
+                  {pairReference.sessions.map((session) => <li key={session}>{session}</li>)}
+                </ul>
+              ) : (
+                <p className="mt-1 text-on-surface-variant">Not placed yet.</p>
+              )}
+            </section>
+          )}
 
           {error && (
             <div role="alert" className="border border-error/30 bg-error-container/30 text-on-error-container rounded-lg p-3 text-sm">

@@ -51,7 +51,7 @@ import WeekScheduleGrid, { type WeekGridEntry } from "../components/schedule-gri
 import { toMinutes } from "../components/schedule-grid/time";
 import { useAuth } from "../hooks/useAuth";
 import { usePeriodicSync } from "../hooks/usePeriodicSync";
-import ClassEditor, { type ClassPlacement, type OccupiedMeeting } from "./master-schedule/ClassEditor";
+import ClassEditor, { type ClassPlacement, type OccupiedMeeting, type PairReference } from "./master-schedule/ClassEditor";
 import { compareProgramCodes, EMPTY_CATALOG, loadCatalog, type Catalog } from "./master-schedule/catalog";
 import GenerationOrderControls from "./master-schedule/GenerationOrderControls";
 import { loadGenerationOrder, orderBlockIds, saveGenerationOrder, type GenerationOrder } from "./master-schedule/generationOrder";
@@ -766,6 +766,36 @@ export default function MasterSchedulePage() {
     }
   }
 
+  /** Unlocks every ticked locked Block, one after another. */
+  async function unlockSelected(ids: string[]) {
+    const master = scheduleRef.current;
+    if (!master || lockBusy || ids.length === 0) return;
+    setLockError(null);
+    setNotice("");
+    let unlocked = 0;
+    try {
+      for (const id of ids) {
+        setLockBusy(id);
+        try {
+          applyLifecycle(await api.unlockBlock(master.schedule_id, id));
+          unlocked += 1;
+        } catch (caught) {
+          // Open the Block that failed, where its reason is shown.
+          selectBlock(id);
+          setLockError({ blockId: id, message: errorMessage(caught, `Could not unlock ${blockName(id)}.`) });
+          sync(true);
+          break;
+        }
+      }
+    } finally {
+      setLockBusy(null);
+    }
+    if (unlocked > 0) {
+      setNotice(`${unlocked} ${unlocked === 1 ? "Block is" : "Blocks are"} unlocked. Edit or generate them again, then lock each one.`);
+      void refreshProposals(master.schedule_id);
+    }
+  }
+
   /**
    * Generates a pair (A-B, C-D, ...) afresh. Paired Blocks share every LEC
    * session and take each LAB at the same time, so a Block regenerated alone
@@ -857,7 +887,14 @@ export default function MasterSchedulePage() {
   }, [catalog.timeSlots]);
 
   const unlockedIds = useMemo(() => new Set(schedule?.unlocked_block_ids ?? []), [schedule]);
-  const blockRows = catalog.blocks.map((block) => {
+  // The list follows the generation order, so it reads in the order a
+  // "Generate" batch takes the Blocks.
+  const orderedBlocks = useMemo(() => {
+    const byId = new Map(catalog.blocks.map((block) => [block.block_id, block]));
+    return orderBlockIds(catalog.blocks.map((block) => block.block_id), catalog.blocks, generationOrder)
+      .map((id) => byId.get(id) as BlockSection);
+  }, [catalog.blocks, generationOrder]);
+  const blockRows = orderedBlocks.map((block) => {
     const accepted = assignments.filter((assignment) => assignment.block_id === block.block_id);
     const conflictCount = accepted.filter((assignment) => conflictsByClass.has(assignment.class_id)).length;
     const empty = classCounts.get(block.block_id) === 0;
@@ -901,6 +938,12 @@ export default function MasterSchedulePage() {
   const bulkNeedsFixes = bulkReviewIds.length - bulkApprovableIds.length;
   const bulkGenerateIds = bulkIds.filter((id) => rowsById.get(id)?.generatable);
   const bulkLockedCount = bulkIds.filter((id) => rowsById.get(id)?.locked).length;
+  // Locked Blocks among the ticked ones that can be unlocked now: none with a
+  // proposal still held in review.
+  const bulkUnlockIds = bulkIds.filter((id) => {
+    const row = rowsById.get(id);
+    return row?.locked && !(row.run && HELD_PHASES.includes(row.run.phase));
+  });
   const allSelected = selectAllIds.length > 0 && selectAllIds.every((id) => bulkSelection.has(id));
   const bulkReplacing = bulkApprovableIds.filter((id) => (rowsById.get(id)?.accepted.length ?? 0) > 0).length;
   const anyApproving = reviewRows.some((row) => row.run?.phase === "approving");
@@ -1249,6 +1292,37 @@ export default function MasterSchedulePage() {
         highlighted: variant === "approved" && highlightClassId === item.class_id,
       }];
     });
+  }
+
+  /**
+   * Where the paired Block takes `subjectCode`: its proposal in review when it
+   * has one, else its approved week. Shown while placing the class by hand.
+   */
+  function pairReference(blockId: string, subjectCode: string): PairReference | undefined {
+    const partner = rowsById.get(blockId)?.partner;
+    if (!partner) return undefined;
+    const partnerRow = rowsById.get(partner.block_id);
+    const inReview = partnerRow?.run?.preview && (partnerRow.run.phase === "review" || partnerRow.run.phase === "approving");
+    const source: { subject_code: string; meeting_days: string | null; time_slot_id: string; room_code: string | null; faculty_id: string }[] = inReview
+      ? partnerRow.run?.preview?.proposed_assignments ?? []
+      : assignments.filter((item) => item.block_id === partner.block_id);
+    const sessions = source
+      .filter((item) => item.subject_code === subjectCode && item.time_slot_id)
+      .map((item) => {
+        const slot = slotsById.get(item.time_slot_id);
+        const time = slot ? `${slot.start_time.slice(0, 5)}–${meetingEndTime(slot.start_time, slot.end_time, item.meeting_days).slice(0, 5)}` : "time not set";
+        return [
+          item.meeting_days || "no days",
+          time,
+          item.room_code || "no room",
+          facultyById.get(item.faculty_id)?.full_name ?? "no instructor",
+        ].join(" · ");
+      });
+    return {
+      blockName: partner.name,
+      source: inReview ? "proposal in review" : partnerRow?.accepted.length ? "approved" : "not generated yet",
+      sessions,
+    };
   }
 
   function proposalEntries(run: BlockRun): WeekGridEntry[] {
@@ -1695,6 +1769,19 @@ export default function MasterSchedulePage() {
                               {bulkIds.length > 0 && !bulkApproving && (
                                 <button type="button" onClick={() => setBulkSelection(new Set())} className={BTN_SECONDARY}>Clear</button>
                               )}
+                              {bulkUnlockIds.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => void unlockSelected(bulkUnlockIds)}
+                                  disabled={bulkLocked || Boolean(lockBusy)}
+                                  className={BTN_SECONDARY}
+                                >
+                                  {lockBusy
+                                    ? <RefreshCw className="w-4 h-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                                    : <LockOpen className="w-4 h-4" aria-hidden="true" />}
+                                  {lockBusy ? "Unlocking..." : `Unlock selected (${bulkUnlockIds.length})`}
+                                </button>
+                              )}
                               {bulkReviewIds.length > 0 && (
                                 <>
                                   <button type="button" onClick={() => setBulkRejectArmed(true)} disabled={bulkLocked} className={BTN_SECONDARY}>
@@ -2011,6 +2098,7 @@ export default function MasterSchedulePage() {
           onSubmit={(value) => saveProposalEdit(editing.blockId, editing.classId, value)}
           onClose={() => setEditing(null)}
           pairNote={proposalPairNote(editing.blockId, editing.classId)}
+          pairReference={pairReference(editing.blockId, editing.subjectCode)}
           termNumber={term?.term_number}
         />
       )}
