@@ -694,7 +694,7 @@ it("refuses a conflicting edit with the validator's reason and keeps the proposa
   // The dialog keeps the entered values; the proposal still shows the original.
   expect((dialog.getByRole("combobox", { name: "Instructor" }) as HTMLInputElement).value).toContain("B. Cruz");
   await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
-  expect(gridEntry(/^Edit CS101/)).toHaveAccessibleName(/A\. Rivera, proposed$/);
+  expect(gridEntry(/^Edit CS101/)).toHaveAccessibleName(/A\. Rivera, proposed/);
 });
 
 it("lists only free instructors and rooms, and says why the others are hidden", async () => {
@@ -1246,4 +1246,28 @@ it("makes Generation order look and work like a button", async () => {
   expect(toggle).toHaveClass("border", "rounded-lg");
   await userEvent.click(toggle);
   expect(screen.getByRole("combobox", { name: "Go by" })).toBeVisible();
+});
+
+it("shows a clash between two proposals in review before either is approved", async () => {
+  succeedEveryRun();
+  // BSCS 1-A and 2-B both want LB 483 with A. Rivera on MW 08:00; 3-C is clear.
+  vi.mocked(api.previewBlockReplacement).mockImplementation(async (_s, blockId) =>
+    blockId === "block-3" ? previewFor(blockId, { slotId: "slot-2", roomCode: "LB 484", facultyId: "faculty-2" }) : previewFor(blockId));
+  renderPage();
+  await generateAll();
+
+  const list = within(screen.getByRole("list", { name: "Blocks" }));
+  const row = (id: string) => list.getAllByRole("listitem").find((item) => item.getAttribute("data-block-row") === id) as HTMLElement;
+  const clashLabel = /Clashes|clashes? with another proposal/;
+  expect(within(row("block-1")).getAllByText(clashLabel).length).toBeGreaterThan(0);
+  expect(within(row("block-2")).getAllByText(clashLabel).length).toBeGreaterThan(0);
+  expect(within(row("block-3")).queryAllByText(clashLabel)).toHaveLength(0);
+
+  const alert = within(screen.getByRole("alert", { name: "Clashes with other proposals" }));
+  expect(alert.getAllByText(/CS101: Same room as BSCS 2-B's proposed CS102 on M/).length).toBeGreaterThan(0);
+  expect(alert.getAllByText(/CS101: Same instructor as BSCS 2-B's proposed CS102 on M/).length).toBeGreaterThan(0);
+  expect(gridEntry(/^Edit CS101/)).toHaveAccessibleName(/conflict: Same room as BSCS 2-B/);
+
+  await userEvent.click(alert.getAllByRole("button", { name: "Open BSCS 2-B" })[0]);
+  expect(await screen.findByRole("heading", { name: "BSCS 2-B" })).toBeInTheDocument();
 });

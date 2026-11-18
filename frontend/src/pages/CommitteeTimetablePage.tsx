@@ -847,7 +847,7 @@ export default function CommitteeTimetablePage() {
 
             {/* Interactive Timetable Controls */}
             {!loading && !error && !needsActiveTerm && term && schedules.length > 0 && (
-              <div className="border border-outline-variant/60 rounded-xl bg-surface-container-lowest p-5 space-y-4 shadow-sm">
+              <div className="relative z-10 border border-outline-variant/60 rounded-xl bg-surface-container-lowest p-5 space-y-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   {/* Schedule Selector */}
                   <div className="flex flex-wrap items-center gap-3 min-w-0 max-w-full">
@@ -1121,7 +1121,7 @@ export default function CommitteeTimetablePage() {
               )}
               <div
                 // Owns both scroll axes so the day header (top) and time column (left) can stick; print shows it all.
-                className="overflow-auto overscroll-x-contain min-h-[16rem] max-h-[calc(100dvh-8rem)] scroll-pt-[45px] scroll-pl-[68px] md:scroll-pl-[84px] scroll-pb-1 scroll-pr-1 print:max-h-none print:overflow-visible border border-outline-variant rounded-xl bg-surface-container-lowest shadow-sm"
+                className="isolate overflow-auto overscroll-x-contain min-h-[16rem] max-h-[calc(100dvh-8rem)] scroll-pt-[45px] scroll-pl-[68px] md:scroll-pl-[84px] scroll-pb-1 scroll-pr-1 print:max-h-none print:overflow-visible border border-outline-variant rounded-xl bg-surface-container-lowest shadow-sm"
                 role="region"
                 aria-label="Committee Timetable Grid"
                 tabIndex={0}

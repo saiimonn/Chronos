@@ -1756,3 +1756,17 @@ it("renders one card listing both Blocks for a joint class", async () => {
   expect(within(cards[0]).getByText("BSCS-1A")).toBeInTheDocument();
   expect(within(cards[0]).getByText("BSCS-1B")).toBeInTheDocument();
 });
+
+it("keeps the filter dropdowns above the timetable grid", async () => {
+  render(
+    <MemoryRouter>
+      <CommitteeTimetablePage />
+    </MemoryRouter>,
+  );
+  const grid = await screen.findByRole("region", { name: "Committee Timetable Grid" });
+  // The grid's sticky header and time column stay inside the grid's own
+  // stacking context, so the filter card (z-10) paints over them.
+  expect(grid).toHaveClass("isolate");
+  const filters = screen.getByRole("group", { name: "Timetable view" }).closest(".relative");
+  expect(filters).toHaveClass("z-10");
+});
