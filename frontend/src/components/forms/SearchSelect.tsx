@@ -203,7 +203,7 @@ export default function SearchSelect({
           role="listbox"
           aria-label={label}
           hidden={!open}
-          className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto border border-outline-variant rounded-lg bg-surface-container-lowest shadow-lg"
+          className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto border border-outline-variant rounded-lg bg-surface-container-lowest shadow-lg"
         >
           {filtered.map((option, index) => (
             <li

@@ -54,6 +54,7 @@ import { usePeriodicSync } from "../hooks/usePeriodicSync";
 import ClassEditor, { type ClassPlacement, type OccupiedMeeting, type PairReference } from "./master-schedule/ClassEditor";
 import { compareProgramCodes, EMPTY_CATALOG, loadCatalog, type Catalog } from "./master-schedule/catalog";
 import GenerationOrderControls from "./master-schedule/GenerationOrderControls";
+import { findProposalClashes, type ProposalClash, type ProposedMeeting } from "./master-schedule/proposalClashes";
 import { loadGenerationOrder, orderBlockIds, saveGenerationOrder, type GenerationOrder } from "./master-schedule/generationOrder";
 import { clearPendingBatch, loadPendingBatch } from "../utils/pendingBlockBatch";
 import { ACTIVE_PHASES, HELD_PHASES, errorMessage, toPayload, useBlockGeneration, type BlockRun, type RunPhase } from "../state/BlockGeneration";
@@ -894,6 +895,30 @@ export default function MasterSchedulePage() {
     return orderBlockIds(catalog.blocks.map((block) => block.block_id), catalog.blocks, generationOrder)
       .map((id) => byId.get(id) as BlockSection);
   }, [catalog.blocks, generationOrder]);
+  // Proposals in review are each checked against the approved schedule only;
+  // this finds where two of them book the same room or instructor at once.
+  const proposalClashes = useMemo(() => {
+    const meetings: ProposedMeeting[] = [];
+    for (const [blockId, run] of Object.entries(runs)) {
+      if (!run.preview || (run.phase !== "review" && run.phase !== "approving")) continue;
+      for (const item of run.preview.proposed_assignments) {
+        const slot = slotsById.get(item.time_slot_id);
+        if (!slot) continue;
+        meetings.push({
+          blockId,
+          classId: item.class_id,
+          offeringId: item.offering_id,
+          subjectCode: item.subject_code,
+          facultyId: item.faculty_id,
+          roomCode: item.room_code,
+          days: parseMeetingDays(item.meeting_days),
+          start: toMinutes(slot.start_time),
+          end: toMinutes(meetingEndTime(slot.start_time, slot.end_time, item.meeting_days)),
+        });
+      }
+    }
+    return findProposalClashes(meetings);
+  }, [runs, slotsById]);
   const blockRows = orderedBlocks.map((block) => {
     const accepted = assignments.filter((assignment) => assignment.block_id === block.block_id);
     const conflictCount = accepted.filter((assignment) => conflictsByClass.has(assignment.class_id)).length;
@@ -910,7 +935,8 @@ export default function MasterSchedulePage() {
     // no run in flight or waiting for review: never generated, discarded,
     // failed, or unlocked to be generated again.
     const generatable = !empty && !locked && !(run && HELD_PHASES.includes(run.phase));
-    return { block, accepted, conflictCount, missing, empty, unlocked, locked, generatable, run, partner: findPartner(block, catalog.blocks) };
+    const clashes = proposalClashes.get(block.block_id) ?? [];
+    return { block, accepted, conflictCount, missing, empty, unlocked, locked, generatable, run, clashes, partner: findPartner(block, catalog.blocks) };
   });
   const rowsById = new Map(blockRows.map((row) => [row.block.block_id, row]));
   const selectedRow = rowsById.get(selectedBlockId) ?? null;
@@ -1325,9 +1351,18 @@ export default function MasterSchedulePage() {
     };
   }
 
+  /** "Same room as BSCS 1-B's proposed CS102 on M" */
+  function clashText(clash: ProposalClash): string {
+    return `Same ${clash.resource} as ${blockName(clash.otherBlockId)}'s proposed ${clash.otherSubjectCode} on ${clash.day}`;
+  }
+
   function proposalEntries(run: BlockRun): WeekGridEntry[] {
     if (!run.preview) return [];
     const conflicts = firstConflictByClass(proposalProblems(run.preview).conflicts);
+    const clashes = new Map<string, string>();
+    for (const clash of proposalClashes.get(run.preview.block_id) ?? []) {
+      if (!clashes.has(clash.classId)) clashes.set(clash.classId, clashText(clash));
+    }
     const diffs = new Map(run.preview.changed_values.map((item) => [item.class_id, item]));
     const replacing = run.preview.changed_values.some((item) => item.current_assignment != null);
     return run.preview.proposed_assignments.flatMap((item) => {
@@ -1345,7 +1380,7 @@ export default function MasterSchedulePage() {
         room: item.room_code,
         teacher: facultyById.get(item.faculty_id)?.full_name ?? item.faculty_id,
         variant: "proposed" as const,
-        conflict: conflicts.get(item.class_id) ?? null,
+        conflict: conflicts.get(item.class_id) ?? clashes.get(item.class_id) ?? null,
         badge: edited ? "Edited" : replacing && diff && diff.status !== "unchanged" ? (diff.status === "added" ? "New" : "Changed") : null,
         highlighted: highlightClassId === item.class_id,
       }];
@@ -2132,7 +2167,7 @@ export default function MasterSchedulePage() {
   // The selected Block's panel: progress, failure, review or approved week.
   function renderBlockPanel() {
     if (!selectedRow) return null;
-    const { block, run, accepted, empty, locked, unlocked, partner, conflictCount } = selectedRow;
+    const { block, run, accepted, empty, locked, unlocked, partner, conflictCount, clashes } = selectedRow;
     const blockId = block.block_id;
     const preview = run?.preview;
     const problems = preview ? proposalProblems(preview) : null;
@@ -2355,6 +2390,24 @@ export default function MasterSchedulePage() {
             {pairHold && partnerRow && !partnerInReview && (
               <p className="text-sm text-on-surface-variant">{pairHold}</p>
             )}
+            {clashes.length > 0 && (
+              <div role="alert" aria-label="Clashes with other proposals" className="text-sm border border-error/30 bg-error-container/30 text-on-error-container rounded-lg p-3">
+                <p className="flex items-start gap-2 font-medium">
+                  <CircleAlert className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  This proposal clashes with {clashes.length === 1 ? "another proposal" : "other proposals"} still in review. Each looks clean alone, but approving both double-books the room or instructor: the second one approved is held back with a conflict error. Change one of the classes first, or approve only the one to keep.
+                </p>
+                <ul className="mt-2 ml-6 list-disc space-y-1">
+                  {clashes.map((clash) => (
+                    <li key={`${clash.classId}-${clash.otherClassId}-${clash.resource}-${clash.day}`}>
+                      {clash.subjectCode}: {clashText(clash)}.{" "}
+                      <button type="button" onClick={() => selectBlock(clash.otherBlockId)} className="text-primary font-medium hover:underline">
+                        Open {blockName(clash.otherBlockId)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {!valid && (
               <div className="text-sm">
                 <p className="flex items-start gap-2 text-error font-medium">
@@ -2487,11 +2540,15 @@ const SHORT_PHASE_LABEL: Partial<Record<RunPhase, string>> = {
   review: "Ready",
 };
 
-function statusFor(row: { run?: BlockRun; accepted: ScheduleAssignment[]; conflictCount: number; missing?: number; empty: boolean; unlocked?: boolean }): { label: string; short?: string; tone: BlockTone } {
+function statusFor(row: { run?: BlockRun; accepted: ScheduleAssignment[]; conflictCount: number; missing?: number; empty: boolean; unlocked?: boolean; clashes?: ProposalClash[] }): { label: string; short?: string; tone: BlockTone } {
   const { run, accepted, conflictCount, empty, unlocked } = row;
   const missing = row.missing ?? 0;
   if (run && run.phase !== "rejected") {
     if (run.phase === "review" && run.preview && !runIsValid(run)) return { label: "Review · needs fixes", short: "Needs fixes", tone: "error" };
+    if (run.phase === "review" && row.clashes && row.clashes.length > 0) {
+      const count = new Set(row.clashes.map((clash) => clash.classId)).size;
+      return { label: `Review · ${count} ${count === 1 ? "class clashes" : "classes clash"} with another proposal`, short: "Clashes", tone: "error" };
+    }
     const tone: BlockTone = run.phase === "failed" ? "error" : run.phase === "review" || run.phase === "approving" ? "review" : "progress";
     return { label: PHASE_LABEL[run.phase], short: SHORT_PHASE_LABEL[run.phase], tone };
   }
