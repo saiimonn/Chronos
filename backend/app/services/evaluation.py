@@ -6,6 +6,7 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 import logging
+import os
 from math import isclose, isfinite
 from string import hexdigits
 from time import perf_counter
@@ -24,7 +25,8 @@ from app.services.validation import ScheduleValidator
 
 logger = logging.getLogger(__name__)
 
-MATCHED_PAIR_COUNT = 10
+# ponytail: research override for the adviser-requested 3-pair test; official runs keep 10.
+MATCHED_PAIR_COUNT = int(os.environ.get("CHRONOS_MATCHED_PAIR_COUNT", "10"))
 SEED_MIN = -(2**63)
 SEED_MAX = 2**63 - 1
 EVALUATION_EXPORT_HEADERS = (

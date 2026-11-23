@@ -25,7 +25,7 @@ import pandas as pd
 
 TRACEABILITY = "CHR-101 / CHR-COLAB-005"
 MODES = ("guided", "unguided")
-PAIR_COUNT = 10
+PAIR_COUNT = int(os.environ.get("CHRONOS_MATCHED_PAIR_COUNT", "10"))
 SEED_MIN = -(2**63)
 SEED_MAX = 2**63 - 1
 TERMINATION_REASONS = ("MAX_GENERATIONS", "OPTIMAL_REACHED", "STAGNATION")
@@ -310,7 +310,7 @@ def load_evaluation_export(path: Path) -> ValidatedExport:
             raise ValueError(f"evaluation export is missing columns: {', '.join(missing)}")
         source_rows = list(reader)
     if len(source_rows) != PAIR_COUNT * len(MODES):
-        raise ValueError("evaluation export must retain exactly 20 guided/unguided runs")
+        raise ValueError(f"evaluation export must retain exactly {PAIR_COUNT * 2} guided/unguided runs")
 
     rows: list[dict[str, Any]] = []
     histories: dict[tuple[int, str], list[dict[str, Any]]] = {}
