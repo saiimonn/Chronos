@@ -14,10 +14,6 @@ export function percent(value: number | null | undefined, digits = 0): string {
   return value === null || value === undefined ? "—" : `${(value * 100).toFixed(digits)}%`;
 }
 
-function hours(value: number | null): string {
-  return value === null ? "—" : `${value.toFixed(1)} h`;
-}
-
 function fraction(ratio: MetricRatio): string {
   return `${Math.round(ratio.numerator)} of ${Math.round(ratio.denominator)}`;
 }
@@ -125,7 +121,10 @@ export default function ScheduleQualityPanel({ termId }: { termId: string }) {
 }
 
 function MetricGrid({ metrics }: { metrics: ScheduleMetrics }) {
-  const { feasibility, faculty, blocks } = metrics;
+  // The Dashboard shows the three metrics the thesis reports. The API also
+  // returns Block day balance and subject-preference figures; they stay
+  // available there but have no card.
+  const { feasibility, faculty } = metrics;
   const rooms = Object.fromEntries(metrics.rooms.map((item) => [item.room_type, item]));
   const all = rooms.all;
   return (
@@ -149,20 +148,6 @@ function MetricGrid({ metrics }: { metrics: ScheduleMetrics }) {
         value={percent(faculty.load.value, 1)}
         detail={`${fraction(faculty.load)} units; ${faculty.faculty_teaching} of ${faculty.faculty_active} teaching, ${faculty.overloaded} overloaded`}
         metric="facultyLoad"
-        metrics={metrics}
-      />
-      <MetricCard
-        label="Balanced Block weeks"
-        value={percent(blocks.balanced.value)}
-        detail={`${fraction(blocks.balanced)} Blocks; mean daily spread ${hours(blocks.mean_spread_hours)}`}
-        metric="dayBalance"
-        metrics={metrics}
-      />
-      <MetricCard
-        label="Subject preference met"
-        value={percent(faculty.preference.value)}
-        detail={`${fraction(faculty.preference)} sessions of a preferred subject`}
-        metric="preference"
         metrics={metrics}
       />
     </div>
