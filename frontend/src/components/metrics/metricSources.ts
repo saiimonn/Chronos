@@ -4,12 +4,7 @@
 
 import type { ScheduleMetrics } from "../../api/client";
 
-export type MetricKey =
-  | "completeness"
-  | "roomUtilization"
-  | "facultyLoad"
-  | "dayBalance"
-  | "preference";
+export type MetricKey = "completeness" | "roomUtilization" | "facultyLoad";
 
 export interface MetricHelp {
   description: string;
@@ -42,20 +37,8 @@ export const METRIC_HELP: Record<MetricKey, MetricHelp> = {
   },
   facultyLoad: {
     description: "Teaching units assigned across all active faculty, against their maximum loads.",
-    formula: "Units assigned ÷ maximum units (full-time 24, part-time 17)",
+    formula: "Units assigned ÷ maximum units (full-time 24, part-time 17 by default; set on the Hard Constraints page)",
     ideal: "No member above their maximum load",
     passes: (m) => m.faculty.overloaded === 0,
-  },
-  dayBalance: {
-    description: "Blocks whose class hours are spread evenly over Monday to Thursday.",
-    formula: "Blocks whose heaviest and lightest days differ by 1.5 h or less ÷ Blocks",
-    ideal: "100% of Blocks balanced",
-    passes: (m) => atLeast(m.blocks.balanced.value, 1),
-  },
-  preference: {
-    description: "Classes of a subject some teacher prefers that went to a teacher who prefers it.",
-    formula: "Sessions taught by a preferring teacher ÷ sessions of a preferred subject",
-    ideal: "100% of those sessions",
-    passes: (m) => atLeast(m.faculty.preference.value, 1),
   },
 };

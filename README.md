@@ -470,11 +470,15 @@ card naming each Block.
 utilization metrics, each with its numerator and denominator: room
 utilization, faculty load against the caps, assignment completeness, hard
 conflicts, Block day balance and preference satisfaction. Student counts are
-approximated by Block capacity. The Dashboard shows each metric green when it
-meets its ideal and red when it does not, with a help tooltip giving the
-description, formula and ideal. Definitions and verified sources are in
-`docs/SCHEDULE_QUALITY_METRICS.md`. The Dashboard no longer has a
-hard-conflicts card.
+approximated by Block capacity.
+
+The Dashboard shows the three metrics the thesis reports: **Assignment
+completeness**, **Room utilization** and **Faculty load**. Each is green when
+it meets its ideal and red when it does not, with a help tooltip giving the
+description, formula and ideal. Hard conflicts, Block day balance and subject
+preference are still computed and returned by the API but have no Dashboard
+card. The GA's day-balance and subject-preference behaviour is unchanged.
+Definitions and verified sources are in `docs/SCHEDULE_QUALITY_METRICS.md`.
 
 ### Users
 

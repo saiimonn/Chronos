@@ -56,11 +56,30 @@ it("colours each value by its ideal and keeps the detail below it", async () => 
 
   const completeness = screen.getByRole("article", { name: "Assignment completeness" });
   expect(within(completeness).getByText("100.0%")).toHaveClass("text-secondary");
-  // 12 of 16 Blocks balanced misses the 100% ideal.
-  const balance = screen.getByRole("article", { name: "Balanced Block weeks" });
-  expect(within(balance).getByText("75%")).toHaveClass("text-error");
-  expect(balance).toHaveAttribute("data-status", "fail");
   expect(api.getScheduleMetrics).toHaveBeenCalledWith("s-1");
+});
+
+it("colours a value red when it misses its ideal", async () => {
+  vi.mocked(api.getScheduleMetrics).mockResolvedValue({
+    ...metrics,
+    faculty: { ...metrics.faculty, overloaded: 2 },
+  });
+  renderPanel();
+  const load = await screen.findByRole("article", { name: "Faculty load" });
+  expect(within(load).getByText(percent(metrics.faculty.load.value, 1))).toHaveClass("text-error");
+  expect(load).toHaveAttribute("data-status", "fail");
+});
+
+it("shows only the three thesis metrics; day balance and preference stay API-only", async () => {
+  renderPanel();
+  await screen.findByRole("article", { name: "Room utilization" });
+  expect(screen.getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
+    "Assignment completeness",
+    "Room utilization",
+    "Faculty load",
+  ]);
+  expect(screen.queryByRole("article", { name: "Balanced Block weeks" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("article", { name: "Subject preference met" })).not.toBeInTheDocument();
 });
 
 it("puts the description, formula and ideal in the help tooltip, with no sources", async () => {
@@ -76,7 +95,7 @@ it("has no hard-conflict card: accepted schedules are conflict-free", async () =
   renderPanel();
   await screen.findByRole("article", { name: "Room utilization" });
   expect(screen.queryByRole("article", { name: "Hard conflicts" })).not.toBeInTheDocument();
-  expect(screen.getAllByRole("article")).toHaveLength(5);
+  expect(screen.getAllByRole("article")).toHaveLength(3);
 });
 
 it("explains when the term has no master schedule", async () => {
