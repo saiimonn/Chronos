@@ -299,7 +299,9 @@ private repository at one full commit. The notebook never clones or pushes.
 The current CHR-101 assignee must review and publish an official run manually.
 
 The export contains 20 rows: guided and unguided runs for each of ten unique
-matched seeds. Failed runs remain in the validated ledger and count against the
+matched seeds. The pair count comes from `CHRONOS_MATCHED_PAIR_COUNT` (default
+10); the adviser-requested 3-pair test sets it to 3 for both the worker and the
+analyzer, which then expects 6 rows (see the main README). Failed runs remain in the validated ledger and count against the
 feasible-run-rate denominator. Unavailable measurements from failures stay
 blank; they are not converted to zero. Matched-seed HPA differences stay blank
 unless both runs succeeded. Descriptive standard deviations use the sample

@@ -16,11 +16,12 @@ a managed Supabase project.
 | `backend/` | FastAPI API, SQLAlchemy models, Alembic migrations, and ARM/GA services |
 | `frontend/` | React 19, TypeScript, and Vite web application |
 | `supabase/` | Local Supabase CLI configuration and generated local state |
+| `scripts/deploy/` | Deployment helpers used by the CD workflows |
+| `docker-compose.yml`, `docker-compose.prod.yml` | Development and local-production container stacks |
 | `docs/` | Project, SRS and thesis documentation (private, see Private Files) |
 | `dataset/` | Approved inputs, versioned preprocessing, and review handoff evidence (private, see Private Files) |
 | `experiments/` | Immutable research run evidence and frozen-rule preparation (private, see Private Files) |
-| `infra/` | Local infrastructure artifacts |
-| `.github/workflows/ci.yml` | Pull request checks for the backend and frontend |
+| `.github/workflows/ci.yml` | Pull request checks for the backend and frontend; a new push to a pull request cancels that PR's run still in progress (runs on `main` are never cancelled) |
 | `.github/workflows/cd.yml` | Deploys `main` to the DCISM server after CI passes (`docs/DCISM_DEPLOYMENT.md`) |
 | `.github/workflows/cd-test.yml` | Deploys `main` to the `/devtest/` test environment after production, or any branch by hand (`docs/TEST_ENVIRONMENT.md`) |
 
@@ -389,6 +390,114 @@ ingestion/provenance lineage without rewriting either branch. Use the normal
 `alembic upgrade head` from either prior branch. Recovery envelopes are deferred
 on ordinary RuleSet reads and explicitly loaded only for recovery.
 
+## Scheduling Features
+
+### Hard Constraints page
+
+`/hard-constraints` (Administration, administrator only) lists every hard
+constraint the validator checks and lets the Department Administrator change
+their numeric limits. The checks themselves cannot be switched off.
+
+| Limit | Default |
+| --- | --- |
+| Full-time teaching load cap | 24 units |
+| Part-time teaching load cap | 17 units |
+| Block day target (first class start to last class end) | 8 hours |
+| Block day limit | 10 hours |
+| Back-to-back limit for a teacher or a Block | 6 hours |
+
+Each save is a new version in `hard_constraint_configuration` (migration
+`a1d3f5b7c9e2`) and becomes the only active one. Problems copy the active
+limits when they are built, so the validator, the GA and readiness read them
+from one place and a queued job keeps the limits it was submitted with.
+Payloads without limits decode to the defaults; versions saved with the older
+per-type fields (lectures and labs in a row, `block_run_limit_hours`) still
+load. The API is `GET /api/v1/hard-constraints` and `GET .../versions`
+(committee members and administrators) and `PUT /api/v1/hard-constraints`
+(administrators; a concurrent save returns 409 `CONFIGURATION_CHANGED`).
+
+Subject allowed rooms are also a hard constraint: a class outside its
+subject's allowed rooms is reported as `ROOM_NOT_ALLOWED`, including manual
+edits and pinned classes. A run of back-to-back classes at or over the limit
+is reported as `BLOCK_CONSECUTIVE_EXCEEDED`.
+
+### Per-Block generation
+
+Each Block (or group of Blocks sharing an Offering) gets one day window of the
+target length. Sampling, mutation, crossover and repair draw start slots only
+from that window. The window is chosen around other Blocks' locked classes and
+only counts teachers still under their unit cap. A short per-Block break keeps
+back-to-back runs under the limit. A run is retried with a 9-hour and then a
+10-hour day only when the 8-hour run leaves a class unplaced or conflicting.
+The first complete, conflict-free run wins; otherwise the run placing the most
+classes wins. A paired Block's labs are placed in the first Block's run, at
+the same time with their own teacher and room, and held as reservations until
+the partner's own proposal exists. Labs are repaired before lectures. A
+Mon–Thu day-balance soft score is used in master-schedule selection; recorded
+generation metrics strip it, so stored P(C) means the same in every run.
+
+### Master Schedule
+
+- The Block list follows the generation order used by Generate. The order
+  panel goes by program or year and ranks by default order, most students,
+  most Blocks, or a custom order, remembered per browser.
+- Select all skips locked Blocks; **Unlock selected** unlocks every ticked
+  locked Block in turn.
+- Batch generation sends review-edited proposals as `context_edits`, so the
+  next Block is generated around the edits.
+- Proposals under review are checked against each other for a shared room or
+  instructor at the same time. Clashes show on the Block list, in the review
+  panel and on the grid card before approval.
+- The class editor counts other Blocks' pending proposals as taken, for both
+  clashes and teaching load, and shows where the paired Block takes the same
+  subject.
+- Approving a Block copies each shared lecture it places onto an approved
+  partner Block that has no record for it. An approved Block with unplaced
+  classes shows "N classes missing".
+- Term 3 (summer) hand edits allow only the MTWTh or F patterns.
+
+### Committee Timetable
+
+`/timetable` (formerly `/committee-timetable`, which redirects) has a Block,
+Room and Faculty view switch. Each view shows one Block, room or member at a
+time, chosen with a searchable picker; Room view opens on LB442. Exports follow
+the current view, with a Whole schedule option. A joint class is drawn as one
+card naming each Block.
+
+### Dashboard schedule metrics
+
+`GET /api/v1/schedules/{schedule_id}/metrics` returns schedule quality and
+utilization metrics, each with its numerator and denominator: room
+utilization, faculty load against the caps, assignment completeness, hard
+conflicts, Block day balance and preference satisfaction. Student counts are
+approximated by Block capacity. The Dashboard shows each metric green when it
+meets its ideal and red when it does not, with a help tooltip giving the
+description, formula and ideal. Definitions and verified sources are in
+`docs/SCHEDULE_QUALITY_METRICS.md`. The Dashboard no longer has a
+hard-conflicts card.
+
+### Users
+
+Administrators can rename an account from the Users page
+(`PATCH /api/v1/users/{user_id}`). Usernames follow the account-creation rules
+and are checked case-insensitively against other accounts.
+
+### Matched-pair count override
+
+The official GA evaluation uses 10 matched seed pairs. For the
+adviser-requested 3-pair test, set `CHRONOS_MATCHED_PAIR_COUNT=3` for both the
+worker and the analyzer, then run from `backend/`:
+
+```bash
+CHRONOS_MATCHED_PAIR_COUNT=3 THREE_PAIR_OUT=<dir> PYTHONPATH=. python scripts/three_pair_evaluation.py
+```
+
+The script submits seeds 0–2 for T1–T3 one term at a time with the official
+Rule Set and GA configurations, skipping a term whose
+`<dir>/<term>/evaluation.csv` exists. Its results run on the current code and
+are not comparable with the official batches. The results are in
+`experiments/CHR-152-CHR-EVAL-010/2026-11-23-three-pair/`.
+
 ## Frontend Setup
 
 Use Node.js 24 for the frontend. If `nvm` is installed, select it before
@@ -583,95 +692,72 @@ cloning or after changing `.opencode` configuration files.
 | API documentation | `http://localhost:8000/docs` |
 | Supabase Studio | `http://127.0.0.1:54323` |
 
+## File Structure
 
-# File Structure
+Main paths only; tests sit next to the code they cover (`*.test.tsx`) or under
+`backend/app/tests/{unit,integration,support}/`.
 
 ```
 chronos/
-├── CLAUDE.md                        # root guidance — see §13 below
-├── README.md
-├── setup.sh                          # one-shot local dev setup (env files, Supabase, deps, migrations)
-├── docker-compose.yml                # orchestrates backend + frontend + local Supabase
-├── docker-compose.prod.yml           # local-production stack: built frontend served by the backend
-├── .github/
-│   └── workflows/
-│       └── ci.yml                    # lint, unit tests, build (dev-time only, FR/NFR: not a runtime dep)
+├── AGENTS.md, CLAUDE.md, GUIDE.md      # agent rules, layout notes, team workflow
+├── PROJECT_OVERVIEW.md, design.md      # thesis summary, UI design notes
+├── setup.sh                            # one-shot local dev setup
+├── docker-compose.yml                  # dev stack: backend, worker, frontend
+├── docker-compose.prod.yml             # local production: built frontend served by the backend
+├── docs, dataset, experiments          # symlinks into private/ (saiimonn/Chronos-docs)
+├── scripts/deploy/                     # CD helpers
+├── supabase/config.toml                # local Supabase stack
+├── tasks/plan.md                       # completed-term capture lane plan
+├── .github/workflows/{ci,cd,cd-test}.yml
 │
 ├── backend/
-│   ├── CLAUDE.md
-│   ├── pyproject.toml
-│   ├── alembic/                      # DB migrations against the ERD (Fig. 10)
-│   │   └── versions/
-│   ├── app/
-│   │   ├── main.py                   # FastAPI app entrypoint
-│   │   ├── core/
-│   │   │   ├── config.py             # env/config, local-only settings
-│   │   │   └── security.py           # role-based auth (Dept Admin vs Scheduling Committee)
-│   │   ├── db/
-│   │   │   ├── session.py            # SQLAlchemy engine/session (local Supabase Postgres)
-│   │   │   └── base.py
-│   │   ├── models/                   # SQLAlchemy models = the ERD entities
-│   │   │   ├── faculty.py            # includes availability_mask (FR-AVL-002)
-│   │   │   ├── subject.py
-│   │   │   ├── room.py
-│   │   │   ├── term.py
-│   │   │   ├── schedule_record.py
-│   │   │   └── extracted_rule.py     # versioned historical-rule sets
-│   │   ├── schemas/                  # Pydantic request/response models
-│   │   ├── api/
-│   │   │   ├── routes_ingestion.py   # Phase 1.1 — FR-ING-*
-│   │   │   ├── routes_terms.py       # Phase 1.2/1.4 — FR-MGT-*, term sync
-│   │   │   ├── routes_rosters.py     # faculty/room/subject CRUD
-│   │   │   ├── routes_availability.py# FR-AVL-*
-│   │   │   ├── routes_rules.py       # Phase 2 — FR-ARM-* (mine, review, activate)
-│   │   │   ├── routes_generate.py    # Phase 3 — FR-GEN-*, GA trigger + config (FR-CFG-*)
-│   │   │   └── routes_export.py      # Phase 4 — FR-EXP-*
-│   │   ├── services/
-│   │   │   ├── ingestion/            # column validation, partial-inclusion rule (BR-004)
-│   │   │   ├── arm/
-│   │   │   │   ├── apriori.py        # Mlxtend wrapper
-│   │   │   │   ├── holdout.py        # chronological holdout split (shared w/ Phase 6 eval)
-│   │   │   │   ├── rule_scoring.py   # support/confidence/lift → normalized P(C) inputs
-│   │   │   │   └── versioning.py     # rule-set generate/activate lifecycle
-│   │   │   ├── ga/
-│   │   │   │   ├── chromosome.py
-│   │   │   │   ├── fitness.py        # lexicographic F(C) = ⟨A(C), -H(C), P(C)⟩
-│   │   │   │   ├── operators.py      # selection/crossover/mutation (DEAP)
-│   │   │   │   ├── repair.py         # deterministic repair procedure
-│   │   │   │   └── config.py         # FR-CFG-* validated parameter store
-│   │   │   └── validation/
-│   │   │       └── hard_constraints.py  # SINGLE shared validator — reused by GA repair,
-│   │   │                                # manual-edit save, and export gate (see §10)
-│   │   └── tests/
-│   │       ├── unit/                 # per bottom-up subcomponent (§4.7 strategy)
-│   │       └── integration/          # cross-module, end-to-end pipeline tests
-│   └── scripts/
-│       └── colab_prototype/          # reference notebooks/scripts ported from initial
-│                                      # Colab ARM run (§4.1.1) — not part of the runtime
+│   ├── alembic/versions/               # additive forward migrations
+│   ├── data/                           # catalog CSVs and scenario/ (see data/README.md)
+│   ├── scripts/
+│   │   ├── chronos_db.sh               # backup and restore
+│   │   ├── refresh_test_db.sh          # /devtest/ database refresh
+│   │   ├── three_pair_evaluation.py    # 3-pair research run
+│   │   └── colab_prototype/            # Colab notebooks and analyzers, not runtime
+│   └── app/
+│       ├── main.py                     # FastAPI app, routers under /api/v1
+│       ├── worker.py                   # durable job worker (GA, ARM, evaluation)
+│       ├── core/                       # settings, API errors
+│       ├── db/session.py               # engine, SessionLocal, Base
+│       ├── models/                     # SQLAlchemy models
+│       ├── schemas/                    # Pydantic request/response models
+│       ├── domain/                     # ORM-free scheduling types, ConstraintLimits, meeting patterns
+│       ├── repositories/               # ORM <-> domain mapping, job queue
+│       ├── api/routes_*.py             # auth, users, terms, catalog, faculty, blocks, cohorts,
+│       │                               # offerings, time slots, readiness, schedules, jobs,
+│       │                               # rule sets, GA configuration, hard constraints,
+│       │                               # historical uploads, evaluations, audit
+│       ├── cli/                        # seed_users, seed_catalog, seed_scenario, import_history, ...
+│       └── services/
+│           ├── catalog/                # terms, faculty, rooms, subjects, curricula, Blocks, offerings
+│           ├── ingestion/              # historical files, uploads, completed-term capture
+│           ├── arm/                    # preprocessing, Apriori mining, rule packages, faculty metrics
+│           ├── ga/                     # chromosome, fitness, operators, repair, day balance, engine
+│           ├── validation/             # the single shared hard-constraint validator
+│           ├── jobs/                   # payload codecs, handlers, supervisor
+│           ├── hard_constraints.py     # versioned ConstraintLimits
+│           ├── schedule_metrics.py     # Dashboard quality metrics
+│           ├── schedules.py, schedule_export.py, evaluation.py, rule_sets.py, readiness.py, ...
 │
-├── frontend/
-│   ├── CLAUDE.md
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── src/
-│       ├── pages/
-│       │   ├── Dashboard.tsx         # Fig. 6
-│       │   ├── MasterSchedule.tsx    # Fig. 7
-│       │   ├── FacultyRoster.tsx     # Fig. 8
-│       │   ├── RoomTerminal.tsx      # Fig. 9
-│       │   └── Settings.tsx          # GA config, rule-set activation (admin-only)
-│       ├── components/
-│       │   ├── schedule-grid/
-│       │   ├── modals/               # Add Course, Add Faculty, Add Room, Edit Room
-│       │   └── command-panel/        # Active Command Panel (edit/dissolve/replacements)
-│       ├── api/                      # typed REST client matching backend/app/api routes
-│       ├── hooks/
-│       └── styles/
-│
-├── infra/
-│   └── supabase/                     # local Supabase Docker config (no managed-cloud config)
-│
-└── docs/
-    ├── srs-excerpts/                 # relevant SRS sections for quick reference during dev
-    └── erd.png                       # Figure 10 source
+└── frontend/
+    ├── scripts/check-no-external-urls.mjs
+    ├── wireframes/
+    └── src/
+        ├── App.tsx                     # routes
+        ├── api/client.ts               # the only backend client
+        ├── pages/                      # Dashboard, Term Setup (SchedulePage), Master Schedule,
+        │   │                           # Committee Timetable, Roster, Subjects, Rooms, Buildings,
+        │   │                           # Job History, Completed History, Historical Upload,
+        │   │                           # Rule Sets, Hard Constraints, GA Configuration,
+        │   │                           # GA Evaluation, Users, Login
+        │   ├── master-schedule/        # class editor, generation order, proposal clashes
+        │   └── roster/                 # preferred subjects, time windows
+        ├── components/                 # layout, schedule-grid, modals, forms, catalog,
+        │                               # metrics, readiness, RoleGate
+        ├── state/                      # Block generation state, app events
+        ├── config/, hooks/, utils/, styles/
 ```

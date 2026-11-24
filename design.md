@@ -15,9 +15,13 @@ steps (finalize, history capture), so it states consequences plainly and never
 decorates.
 
 ## Site map and flow
-Left sidebar for every signed-in page, grouped: Daily scheduling (Dashboard,
-Term Setup, Master Schedule, Committee Timetable), Catalogs (Faculty, Subjects,
-Rooms, Buildings), History and rules, Administration. At phone width the
+Left sidebar for every signed-in page, grouped: Daily scheduling (Ops
+Dashboard, Term Setup, Master Schedule, Committee Timetable), Catalogs (Faculty
+Roster, Subjects, Rooms Terminal, Buildings), History and rules (Job History,
+Completed History, Historical Upload, Rule Sets), Administration (Hard
+Constraints, GA Configuration, GA Evaluation, Users). Administrator-only items
+are hidden from committee members. Committee Timetable switches between Block,
+Room and Faculty views, one at a time, with searchable pickers. At phone width the
 sidebar collapses to a 64px icon rail with an overlay menu. Work happens in
 Term Setup → Master Schedule → Committee Timetable; see
 `docs/ux/core-journey.md`.
@@ -47,6 +51,9 @@ Tokens in `frontend/tailwind.config.js` (Material 3 names). Canvas
 for actions, selection and links. Status: `error`/`error-container` for
 conflicts and failures, `tertiary-fixed` for queued or running,
 `secondary-container` for done **(inferred; there is no success token)**.
+Dashboard metric values use `text-secondary` when they meet their ideal and
+`text-error` when they do not, with the ideal stated in the metric's help
+tooltip so color is never the only signal.
 Light only.
 
 ## Type
